@@ -41,6 +41,7 @@ export const AUTO_BUY_DELAY = Number(retrieveEnvVariable('AUTO_BUY_DELAY', logge
 export const QUOTE_MINT = retrieveEnvVariable('QUOTE_MINT', logger);
 export const QUOTE_AMOUNT = retrieveEnvVariable('QUOTE_AMOUNT', logger);
 export const MAX_BUY_RETRIES = Number(retrieveEnvVariable('MAX_BUY_RETRIES', logger));
+export const MAX_BUY_DURATION = Number(retrieveEnvVariable('MAX_BUY_DURATION', logger));
 export const BUY_SLIPPAGE = Number(retrieveEnvVariable('BUY_SLIPPAGE', logger));
 
 export const BUY_SIGNAL_TIME_TO_WAIT = Number(retrieveEnvVariable('BUY_SIGNAL_TIME_TO_WAIT', logger));

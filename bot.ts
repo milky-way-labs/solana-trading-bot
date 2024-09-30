@@ -42,6 +42,7 @@ export interface BotConfig {
   autoSellDelay: number;
   maxBuyRetries: number;
   maxSellRetries: number;
+  maxBuyDuration: number;
   unitLimit: number;
   unitPrice: number;
   takeProfit: number;
@@ -206,8 +207,8 @@ export class Bot {
       for (let i = 0; i < this.config.maxBuyRetries; i++) {
         try {
 
-          if ((Date.now() - startTime) > 10000) {
-            logger.info(`Not buying mint ${poolState.baseMint.toString()}, max buy 10 sec timer exceeded!`);
+          if ((Date.now() - startTime) > this.config.maxBuyDuration) {
+            logger.info(`Not buying mint ${poolState.baseMint.toString()}, max buy ${this.config.maxBuyDuration/1000} sec timer exceeded!`);
             return;
           }
 
