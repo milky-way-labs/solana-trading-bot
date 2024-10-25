@@ -93,6 +93,7 @@ export const HOLDER_MIN_AMOUNT = Number (retrieveEnvVariable('HOLDER_MIN_AMOUNT'
 //Telegram config
 export const TELEGRAM_BOT_TOKEN = retrieveEnvVariable('TELEGRAM_BOT_TOKEN', logger);
 export const TELEGRAM_CHAT_ID = Number (retrieveEnvVariable('TELEGRAM_CHAT_ID', logger));
+export const TELEGRAM_THREAD_ID = Number (retrieveEnvVariable('TELEGRAM_THREAD_ID', logger));
 
 //Technical analysis
 export const MACD_SHORT_PERIOD = Number (retrieveEnvVariable('MACD_SHORT_PERIOD', logger));

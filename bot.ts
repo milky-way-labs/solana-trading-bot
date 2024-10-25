@@ -60,6 +60,7 @@ export interface BotConfig {
   checkTokenDistribution: boolean;
   checkAbnormalDistribution: boolean;
   telegramChatId: number;
+  telegramThreadId: number;
   telegramBotToken: string,
   blacklistRefreshInterval: number,
   MACDLongPeriod: number,
