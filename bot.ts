@@ -306,6 +306,7 @@ export class Bot {
             const shouldSell = await this.tradeSignals.waitForSellSignal(tokenAmountIn, poolKeys);
 
             if (!shouldSell) {
+              this.poolStorage.markAsSold(rawAccount.mint.toString());
               return;
             }
           }
