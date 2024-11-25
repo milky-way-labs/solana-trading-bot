@@ -66,8 +66,10 @@ import {
   BUY_SIGNAL_PRICE_INTERVAL,
   BUY_SIGNAL_FRACTION_TIME_TO_WAIT,
   BUY_SIGNAL_LOW_VOLUME_THRESHOLD,
+  USE_TA,
   USE_TELEGRAM,
-  USE_TA
+  USE_PUMP_FUN,
+  USE_RAYDIUM
 } from './helpers';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
@@ -264,6 +266,8 @@ const runListener = async () => {
     quoteToken,
     autoSell: AUTO_SELL,
     cacheNewMarkets: CACHE_NEW_MARKETS,
+    useRaydium: USE_RAYDIUM,
+    usePumpFun: USE_PUMP_FUN,
   });
 
   listeners.on('market', (updatedAccountInfo: KeyedAccountInfo) => {
@@ -278,6 +282,9 @@ const runListener = async () => {
 
     let currentTimestamp = Math.floor(new Date().getTime() / 1000);
     let lag = currentTimestamp - poolOpenTime;
+
+    logger.trace(`Pump fun new token: ${{poolState, poolOpenTime, exists}}`);
+    return;
 
     if (!exists && poolOpenTime > runTimestamp) {
       poolCache.save(updatedAccountInfo.accountId.toString(), poolState);

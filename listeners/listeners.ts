@@ -3,6 +3,7 @@ import bs58 from 'bs58';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { EventEmitter } from 'events';
+import {logger} from "../helpers";
 
 export class Listeners extends EventEmitter {
   private subscriptions: number[] = [];
@@ -16,14 +17,23 @@ export class Listeners extends EventEmitter {
     quoteToken: Token;
     autoSell: boolean;
     cacheNewMarkets: boolean;
+    useRaydium: boolean;
+    usePumpFun: boolean;
   }) {
     if (config.cacheNewMarkets) {
       const openBookSubscription = await this.subscribeToOpenBookMarkets(config);
       this.subscriptions.push(openBookSubscription);
     }
 
-    const raydiumSubscription = await this.subscribeToRaydiumPools(config);
-    this.subscriptions.push(raydiumSubscription);
+    if (config.useRaydium) {
+      const raydiumSubscription = await this.subscribeToRaydiumPools(config);
+      this.subscriptions.push(raydiumSubscription);
+    }
+
+    if (config.usePumpFun) {
+      const pumpFunSubscription = await this.subscribeToPumpFunPools(config);
+      this.subscriptions.push(pumpFunSubscription);
+    }
 
     if (config.autoSell) {
       const walletSubscription = await this.subscribeToWalletChanges(config);
@@ -78,6 +88,38 @@ export class Listeners extends EventEmitter {
           },
         },
       ],
+    );
+  }
+
+  private async subscribeToPumpFunPools(config: { quoteToken: Token }) {
+    logger.trace(`subscribe to pump fun`);
+    return this.connection.onProgramAccountChange(
+        new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'),
+        async (updatedAccountInfo) => {
+          this.emit('pool', updatedAccountInfo);
+        },
+        this.connection.commitment,
+        [
+          { dataSize: LIQUIDITY_STATE_LAYOUT_V4.span },
+          {
+            memcmp: {
+              offset: LIQUIDITY_STATE_LAYOUT_V4.offsetOf('quoteMint'),
+              bytes: config.quoteToken.mint.toBase58(),
+            },
+          },
+          {
+            memcmp: {
+              offset: LIQUIDITY_STATE_LAYOUT_V4.offsetOf('marketProgramId'),
+              bytes: new PublicKey('EcfWfdZx8TxF2kV6tWWHtv9PzabBndFaHmNMmtSdjXkA').toBase58(),
+            },
+          },
+          {
+            memcmp: {
+              offset: LIQUIDITY_STATE_LAYOUT_V4.offsetOf('status'),
+              bytes: bs58.encode([6, 0, 0, 0, 0, 0, 0, 0]),
+            },
+          },
+        ],
     );
   }
 
