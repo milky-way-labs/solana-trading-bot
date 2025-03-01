@@ -1,0 +1,90 @@
+name: build docker image
+
+on:
+  workflow_dispatch:
+
+jobs:
+  make-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if branch is not master
+        if: github.ref != format('refs/heads/{0}', 'master')
+        run: |
+          echo "This workflow should not be triggered with workflow_dispatch on a branch other than master"
+          exit 1
+
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+            token: ${{ secrets.GH_TOKEN }}
+            submodules: 'true'
+
+      - name: Calculate tag name
+        run: |
+          git fetch --tags
+
+          year=$(date +'%y')
+          month=$(date +'%m')
+          day=$(date +'%d')
+          week_of_month=$(( (10#$day - 1) / 7 ))
+          latest_tag=$(git tag -l "v$year.$month.$week_of_month.*" --sort=-v:refname | head -n 1)
+
+          if [ -z "$latest_tag" ]
+          then
+            release_index=$((0 + 1))
+          else
+            release_index=$(echo $latest_tag | awk -F '.' '{print $4}')
+            release_index=$((release_index + 1))
+          fi
+
+          tag_name="v$year.$month.$week_of_month.$release_index"
+          echo "tag_name=$tag_name" >> $GITHUB_ENV
+
+      - name: Create tag
+        run: |
+          tag_name="${{ env.tag_name }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag_name" -m "stable release"
+          git push origin "$tag_name"
+
+      - name: Create release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.tag_name }}
+          release_name: ${{ env.tag_name }}
+
+    outputs:
+      tag-name: ${{ env.tag_name }}
+
+  docker:
+    needs: make-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v2
+
+      - uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: meta for image
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ needs.make-tag.outputs.tag-name }}
+
+      - name: build and push image
+        uses: docker/build-push-action@v4
+        with:
+          cache-from: type=gha,scope=base
+          cache-to: type=gha,scope=base,mode=max
+          file: .docker/build/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
