@@ -1,9 +1,0 @@
-version: '3.8'
-
-services:
-
-  app:
-    image: ghcr.io/milky-way-labs/solana-trading-bot:${VERSION}
-
-    volumes:
-      - ./app/.env:/var/www/html/.env:ro
