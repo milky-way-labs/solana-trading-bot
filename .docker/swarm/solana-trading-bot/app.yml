@@ -5,10 +5,5 @@ services:
   app:
     image: ghcr.io/milky-way-labs/solana-trading-bot:${VERSION}
 
-    secrets:
-      - source: solana_trading_bot_env
-        target: /var/www/html/.env
-
-secrets:
-  solana_trading_bot_env:
-    external: true
+    volumes:
+      - ./app/.env:/var/www/html/.env:ro

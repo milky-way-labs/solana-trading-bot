@@ -1,9 +1,16 @@
+# Swarm
+
+Copy stack stack config
+
 ```shell
 cp example.env .env
 ```
 
+> Accertati che il file .env sia allineato con quello dell'applicazione. 
+
+
 ```shell
-docker secret create solana_trading_bot_env ../../../.env
+cp app/example.env app/.env
 ```
 
 ```shell
