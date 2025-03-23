@@ -27,6 +27,20 @@ import { TradeSignals } from './tradeSignals';
 import { Messaging } from './messaging';
 import { WhitelistCache } from './cache/whitelist.cache';
 import { TechnicalAnalysisCache } from './cache/technical-analysis.cache';
+import { initDB, logBuy, logSell } from './db';
+
+
+async function main() {
+  await initDB();
+  /*
+  const tokenAddress = 'So1FakeAddress...'; // questo lo prenderai da dove hai i dati reali
+  const calculatedGain = 12.5; // anche questo lo otterrai dopo la vendita reale
+  await logBuy(tokenAddress);
+  await logSell(tokenAddress, calculatedGain);
+  */
+}
+
+main();
 
 export interface BotConfig {
   wallet: Keypair;
@@ -241,7 +255,7 @@ export class Bot {
             );
 
             await this.messaging.sendTelegramMessage(`💚Confirmed buy💚\n\nMint <code>${poolKeys.baseMint.toString()}</code>\nSignature <code>${result.signature}</code>`, poolState.baseMint.toString())
-
+            await logBuy(poolKeys.baseMint.toString());
             break;
           }
 
@@ -357,6 +371,7 @@ export class Bot {
                     let percentageChange = (profitOrLoss / quoteAmountNumber) * 100
 
                     await this.messaging.sendTelegramMessage(`⭕Confirmed sale at <b>${(post - pre).toFixed(5)}</b>⭕\n\n${profitOrLoss < 0 ? "🔴Loss " : "🟢Profit "}<code>${profitOrLoss.toFixed(5)} ${this.config.quoteToken.symbol} (${(percentageChange).toFixed(2)}%)</code>\n\nRetries <code>${i + 1}/${this.config.maxSellRetries}</code>`, rawAccount.mint.toString());
+                    await logSell(rawAccount.mint.toString(), percentageChange);
                   }
                 })
                 .catch((error) => {
