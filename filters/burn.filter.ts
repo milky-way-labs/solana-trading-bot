@@ -15,8 +15,28 @@ export class BurnFilter implements Filter {
 
     try {
       const amount = await this.connection.getTokenSupply(poolKeys.lpMint, this.connection.commitment);
+      // Check if the LP token supply is 0, which means the creator burned their LP tokens
+      // This is a good sign as it means they can't rug pull by removing liquidity
       const burned = amount.value.uiAmount === 0;
       const result = { ok: burned, message: burned ? undefined : "Burned -> Creator didn't burn LP" };
+
+      const tokenAmount = await this.connection.getTokenSupply(poolKeys.baseMint)
+
+      logger.trace(`Token supply: ${tokenAmount.value.uiAmount}`);
+      const baseTokenAmount = await this.connection.getTokenAccountBalance(poolKeys.baseVault);
+      const quoteTokenAmount = await this.connection.getTokenAccountBalance(poolKeys.quoteVault);
+      logger.trace(`Base token amount in pool: ${baseTokenAmount.value.uiAmount}`);
+      logger.trace(`Quote token amount in pool: ${quoteTokenAmount.value.uiAmount}`);
+
+      // Calculate percentage of tokens in pool vs total supply
+      const percentageInPool = (baseTokenAmount.value.uiAmount! / tokenAmount.value.uiAmount!) * 100;
+      logger.trace(`Percentage of tokens in pool: ${percentageInPool.toFixed(2)}%`);
+
+      // If lesse than 99% of tokens are in pool, it's suspicious
+      if (percentageInPool < 99) {
+        result.ok = false;
+        result.message = `Suspicious: ${percentageInPool.toFixed(2)}% of total token supply is in pool`;
+      }
 
       if (result.ok) {
         this.cachedResult = result;
