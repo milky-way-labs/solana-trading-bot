@@ -27,20 +27,7 @@ import { TradeSignals } from './tradeSignals';
 import { Messaging } from './messaging';
 import { WhitelistCache } from './cache/whitelist.cache';
 import { TechnicalAnalysisCache } from './cache/technical-analysis.cache';
-import { initDB, logBuy, logSell } from './db';
-
-
-async function main() {
-  await initDB();
-  /*
-  const tokenAddress = 'So1FakeAddress...'; // questo lo prenderai da dove hai i dati reali
-  const calculatedGain = 12.5; // anche questo lo otterrai dopo la vendita reale
-  await logBuy(tokenAddress);
-  await logSell(tokenAddress, calculatedGain);
-  */
-}
-
-main();
+import { logBuy, logSell } from './db';
 
 export interface BotConfig {
   wallet: Keypair;

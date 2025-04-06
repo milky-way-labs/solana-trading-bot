@@ -24,6 +24,7 @@ export const RPC_ENDPOINT = retrieveEnvVariable('RPC_ENDPOINT', logger);
 export const RPC_WEBSOCKET_ENDPOINT = retrieveEnvVariable('RPC_WEBSOCKET_ENDPOINT', logger);
 
 // Bot
+export const INSTANCE_ID = retrieveEnvVariable('INSTANCE_ID', logger);
 export const LOG_LEVEL = retrieveEnvVariable('LOG_LEVEL', logger);
 export const MAX_TOKENS_AT_THE_TIME = Number(retrieveEnvVariable('MAX_TOKENS_AT_THE_TIME', logger));
 export const COMPUTE_UNIT_LIMIT = Number(retrieveEnvVariable('COMPUTE_UNIT_LIMIT', logger));
@@ -101,3 +102,6 @@ export const MACD_LONG_PERIOD = Number (retrieveEnvVariable('MACD_LONG_PERIOD', 
 export const MACD_SIGNAL_PERIOD = Number (retrieveEnvVariable('MACD_SIGNAL_PERIOD', logger));
 
 export const RSI_PERIOD = Number (retrieveEnvVariable('RSI_PERIOD', logger));
+
+// MongoDB
+export const MONGODB_URI = retrieveEnvVariable('MONGODB_URI', logger);

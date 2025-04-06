@@ -13,6 +13,11 @@ To run the script you need to:
 - Transfer some SOL to it.
 - Convert some SOL to USDC or WSOL.
   - You need USDC or WSOL depending on the configuration set below.
+- Install and start MongoDB (required for trade logging)
+  - Install MongoDB from https://www.mongodb.com/try/download/community
+  - Start MongoDB service
+  - The default connection URL is mongodb://localhost:27017/solana-trading-bot
+  - You can customize the MongoDB connection URL using the MONGODB_URI environment variable
 - Configure the script by updating `.env.copy` file (remove the .copy from the file name when done).
   - Check [Configuration](#configuration) section bellow
 - Install dependencies by typing: `npm install`
@@ -22,6 +27,10 @@ You should see the following output:
 ![output](readme/output.png)
 
 ### Configuration
+
+#### Database
+
+- `MONGODB_URI` - MongoDB connection string (default: mongodb://localhost:27017/solana-trading-bot)
 
 #### Wallet
 
@@ -35,6 +44,7 @@ You should see the following output:
 
 #### Bot
 
+- `INSTANCE_ID` - Unique identifier for this bot instance (default: default)
 - `LOG_LEVEL` - Set logging level, e.g., `info`, `debug`, `trace`, etc.
 - `MAX_TOKENS_AT_THE_TIME` - Set to `1` to process buying one token at a time.
 - `COMPUTE_UNIT_LIMIT` - Compute limit used to calculate fees.

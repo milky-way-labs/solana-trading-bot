@@ -1,10 +1,13 @@
-import { Entity, Column, PrimaryGeneratedColumn, createConnection, getConnection, getRepository, Connection } from 'typeorm';
-import { join } from 'path';
+import { Entity, Column, ObjectIdColumn, createConnection, getMongoRepository, Connection } from 'typeorm';
+import { ObjectId } from 'mongodb';
+import {INSTANCE_ID, MONGODB_URI} from './helpers';
+
+// fixme: deprecations
 
 @Entity()
 export class Trade {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @ObjectIdColumn()
+  id: ObjectId;
 
   @Column()
   tokenAddress: string;
@@ -17,6 +20,9 @@ export class Trade {
 
   @Column({ type: 'float', nullable: true })
   gainLossPercentage?: number;
+
+  @Column()
+  instanceId: string;
 }
 
 let connection: Connection | null = null;
@@ -24,8 +30,10 @@ let connection: Connection | null = null;
 export async function initDB() {
   if (!connection) {
     connection = await createConnection({
-      type: 'sqlite',
-      database: join(__dirname, 'trades.sqlite'),
+      type: 'mongodb',
+      url: MONGODB_URI,
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
       entities: [Trade],
       synchronize: true,
     });
@@ -35,10 +43,11 @@ export async function initDB() {
 export async function logBuy(tokenAddress: string): Promise<void> {
   if (!connection) await initDB();
 
-  const repo = getRepository(Trade);
+  const repo = getMongoRepository(Trade);
   const trade = new Trade();
   trade.tokenAddress = tokenAddress;
   trade.buyDateTime = new Date();
+  trade.instanceId = INSTANCE_ID;
 
   await repo.save(trade);
 }
@@ -46,8 +55,14 @@ export async function logBuy(tokenAddress: string): Promise<void> {
 export async function logSell(tokenAddress: string, gainLossPercentage: number): Promise<void> {
   if (!connection) await initDB();
 
-  const repo = getRepository(Trade);
-  const trade = await repo.findOne({ where: { tokenAddress, sellDateTime: null } });
+  const repo = getMongoRepository(Trade);
+  const trade = await repo.findOne({ 
+    where: { 
+      tokenAddress, 
+      sellDateTime: null,
+      instanceId: INSTANCE_ID 
+    } 
+  });
 
   if (trade) {
     trade.sellDateTime = new Date();
