@@ -7,11 +7,6 @@ jobs:
   make-tag:
     runs-on: ubuntu-latest
     steps:
-      - name: Fail if branch is not master
-        if: github.ref != format('refs/heads/{0}', 'master')
-        run: |
-          echo "This workflow should not be triggered with workflow_dispatch on a branch other than master"
-          exit 1
 
       - name: Checkout repository
         uses: actions/checkout@v2
