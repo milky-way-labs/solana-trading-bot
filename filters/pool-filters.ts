@@ -17,6 +17,7 @@ import {
 import { HoldersCountFilter, TopHolderDistributionFilter } from './holders';
 import { BlacklistFilter } from './blacklist.filter';
 import { BlacklistCache } from '../cache';
+import { InitialLiquidityValueFilter } from './initial-liquidity-value.filter';
 
 export interface Filter {
   execute(poolKeysV4: LiquidityPoolKeysV4): Promise<FilterResult>;
@@ -74,6 +75,15 @@ export class PoolFilters {
           args.quoteToken,
           args.minPoolSize,
           args.maxPoolSize,
+        ),
+      );
+    }
+
+    if (!args.minInitialLiquidityValue.isZero()) {
+      this.filters.push(
+        new InitialLiquidityValueFilter(
+          connection,
+          args.quoteToken,
           args.minInitialLiquidityValue,
         ),
       );

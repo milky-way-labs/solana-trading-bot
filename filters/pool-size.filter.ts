@@ -1,7 +1,7 @@
 import { Filter, FilterResult } from './pool-filters';
 import { LiquidityPoolKeysV4, Token, TokenAmount } from '@raydium-io/raydium-sdk';
 import { Connection } from '@solana/web3.js';
-import { analyzeAddLiquidityForToken, logger } from '../helpers';
+import { logger } from '../helpers';
 
 export class PoolSizeFilter implements Filter {
   constructor(
@@ -9,7 +9,6 @@ export class PoolSizeFilter implements Filter {
     private readonly quoteToken: Token,
     private readonly minPoolSize: TokenAmount,
     private readonly maxPoolSize: TokenAmount,
-    private readonly minInitialLiquidityValue: TokenAmount,
   ) {}
 
   async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
@@ -31,22 +30,6 @@ export class PoolSizeFilter implements Filter {
 
         if (!inRange) {
           return { ok: false, message: `PoolSize -> Pool size ${poolSize.toFixed()} < ${this.minPoolSize.toFixed()}` };
-        }
-      }
-
-      if (!this.minInitialLiquidityValue?.isZero()) {
-        const liquidity = await analyzeAddLiquidityForToken(this.connection, poolKeys.quoteVault, this.quoteToken);
-
-        if (liquidity) {
-          const wsolAmount = new TokenAmount(this.quoteToken, liquidity.wsolAdded);
-
-          inRange = wsolAmount.raw.gte(this.minInitialLiquidityValue.raw);
-
-          if (!inRange) {
-            return { ok: false, message: `PoolSize -> Pool size ${poolSize.toFixed()} < ${this.minPoolSize.toFixed()}` };
-          }
-        } else {
-          logger.warn({ mint: poolKeys.baseMint }, `Failed to check initial liquidity value`);
         }
       }
 
