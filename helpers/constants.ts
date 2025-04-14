@@ -76,6 +76,7 @@ export const CHECK_IF_FREEZABLE = retrieveEnvVariable('CHECK_IF_FREEZABLE', logg
 export const CHECK_IF_BURNED = retrieveEnvVariable('CHECK_IF_BURNED', logger) === 'true';
 export const MIN_POOL_SIZE = retrieveEnvVariable('MIN_POOL_SIZE', logger);
 export const MAX_POOL_SIZE = retrieveEnvVariable('MAX_POOL_SIZE', logger);
+export const MIN_INITIAL_LIQUIDITY_VALUE = retrieveEnvVariable('MIN_INITIAL_LIQUIDITY_VALUE', logger);
 export const USE_SNIPE_LIST = retrieveEnvVariable('USE_SNIPE_LIST', logger) === 'true';
 export const SNIPE_LIST_REFRESH_INTERVAL = Number(retrieveEnvVariable('SNIPE_LIST_REFRESH_INTERVAL', logger));
 export const BLACKLIST_REFRESH_INTERVAL = Number(retrieveEnvVariable('BLACKLIST_REFRESH_INTERVAL', logger));

@@ -30,6 +30,7 @@ export interface FilterResult {
 export interface PoolFilterArgs {
   minPoolSize: TokenAmount;
   maxPoolSize: TokenAmount;
+  minInitialLiquidityValue: TokenAmount;
   quoteToken: Token;
 }
 
@@ -41,12 +42,11 @@ export class PoolFilters {
     readonly args: PoolFilterArgs,
     readonly blacklistCache: BlacklistCache
   ) {
-
-    if(CHECK_HOLDERS){
+    if (CHECK_HOLDERS) {
       this.filters.push(new HoldersCountFilter(connection));
     }
 
-    if(CHECK_TOKEN_DISTRIBUTION){
+    if (CHECK_TOKEN_DISTRIBUTION) {
       this.filters.push(new TopHolderDistributionFilter(connection));
     }
 
@@ -59,14 +59,24 @@ export class PoolFilters {
     }
 
     if (CHECK_IF_MUTABLE || CHECK_IF_SOCIALS) {
-      this.filters.push(new MutableFilter(connection, getMetadataAccountDataSerializer(), CHECK_IF_MUTABLE, CHECK_IF_SOCIALS));
+      this.filters.push(
+        new MutableFilter(connection, getMetadataAccountDataSerializer(), CHECK_IF_MUTABLE, CHECK_IF_SOCIALS),
+      );
     }
 
     // not optional
     this.filters.push(new BlacklistFilter(connection, blacklistCache));
 
     if (!args.minPoolSize.isZero() || !args.maxPoolSize.isZero()) {
-      this.filters.push(new PoolSizeFilter(connection, args.quoteToken, args.minPoolSize, args.maxPoolSize));
+      this.filters.push(
+        new PoolSizeFilter(
+          connection,
+          args.quoteToken,
+          args.minPoolSize,
+          args.maxPoolSize,
+          args.minInitialLiquidityValue,
+        ),
+      );
     }
   }
 

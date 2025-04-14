@@ -17,6 +17,7 @@ import {
   QUOTE_MINT,
   MAX_POOL_SIZE,
   MIN_POOL_SIZE,
+  MIN_INITIAL_LIQUIDITY_VALUE,
   QUOTE_AMOUNT,
   PRIVATE_KEY,
   USE_SNIPE_LIST,
@@ -155,6 +156,7 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
     logger.info(`Check socials: ${CHECK_IF_SOCIALS}`);
     logger.info(`Min pool size: ${botConfig.minPoolSize.toFixed()}`);
     logger.info(`Max pool size: ${botConfig.maxPoolSize.toFixed()}`);
+    logger.info(`Min initial liquidity value: ${botConfig.minInitialLiquidityValue.toFixed()}`);
   }
 
   logger.info(`Check Holders: ${botConfig.checkHolders}`);    
@@ -202,6 +204,7 @@ const runListener = async () => {
     quoteAta: getAssociatedTokenAddressSync(quoteToken.mint, wallet.publicKey),
     minPoolSize: new TokenAmount(quoteToken, MIN_POOL_SIZE, false),
     maxPoolSize: new TokenAmount(quoteToken, MAX_POOL_SIZE, false),
+    minInitialLiquidityValue: new TokenAmount(quoteToken, MIN_INITIAL_LIQUIDITY_VALUE, false),
     quoteToken,
     quoteAmount: new TokenAmount(quoteToken, QUOTE_AMOUNT, false),
     maxTokensAtTheTime: MAX_TOKENS_AT_THE_TIME,

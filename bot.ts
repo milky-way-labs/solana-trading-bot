@@ -33,6 +33,7 @@ export interface BotConfig {
   wallet: Keypair;
   minPoolSize: TokenAmount;
   maxPoolSize: TokenAmount;
+  minInitialLiquidityValue: TokenAmount;
   quoteToken: Token;
   quoteAmount: TokenAmount;
   quoteAta: PublicKey;
@@ -482,6 +483,7 @@ export class Bot {
       quoteToken: this.config.quoteToken,
       minPoolSize: this.config.minPoolSize,
       maxPoolSize: this.config.maxPoolSize,
+      minInitialLiquidityValue: this.config.minInitialLiquidityValue,
     }, this.blacklistCache);
 
     const timesToCheck = this.config.filterCheckDuration / this.config.filterCheckInterval;
