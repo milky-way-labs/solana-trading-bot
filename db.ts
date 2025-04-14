@@ -41,6 +41,7 @@ export async function initDB() {
 }
 
 export async function logBuy(tokenAddress: string): Promise<void> {
+  if (!MONGODB_URI) return;
   if (!connection) await initDB();
 
   const repo = getMongoRepository(Trade);
@@ -53,6 +54,7 @@ export async function logBuy(tokenAddress: string): Promise<void> {
 }
 
 export async function logSell(tokenAddress: string, gainLossPercentage: number): Promise<void> {
+  if (!MONGODB_URI) return;
   if (!connection) await initDB();
 
   const repo = getMongoRepository(Trade);
