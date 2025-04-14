@@ -15,7 +15,7 @@ export class InitialLiquidityValueFilter implements Filter {
       let inRange = true;
 
       if (!this.minInitialLiquidityValue?.isZero()) {
-        const liquidity = await analyzeAddLiquidityForToken(this.connection, poolKeys.quoteVault, this.quoteToken);
+        const liquidity = await analyzeAddLiquidityForToken(this.connection, poolKeys.baseMint, this.quoteToken);
 
         if (liquidity) {
           const wsolAmount = new TokenAmount(this.quoteToken, liquidity.wsolAdded);
