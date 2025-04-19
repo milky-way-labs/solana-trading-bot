@@ -1,11 +1,9 @@
 import { Filter, FilterResult } from './pool-filters';
 import { LiquidityPoolKeysV4, Token, TokenAmount } from '@raydium-io/raydium-sdk';
-import { Connection } from '@solana/web3.js';
-import { analyzeAddLiquidityForToken, logger } from '../helpers';
+import { extractInitialUsdcAmount, getToken, logger } from '../helpers';
 
-export class InitialLiquidityValueFilter implements Filter {
+export class InitialLiquidityUsdcValueFilter implements Filter {
   constructor(
-    private readonly connection: Connection,
     private readonly quoteToken: Token,
     private readonly minInitialLiquidityValue: TokenAmount,
   ) {}
@@ -15,17 +13,19 @@ export class InitialLiquidityValueFilter implements Filter {
       let inRange = true;
 
       if (!this.minInitialLiquidityValue?.isZero()) {
-        const liquidity = await analyzeAddLiquidityForToken(this.connection, poolKeys.baseMint, this.quoteToken);
+        // fixme: proxy
+        // fixme: wsol!!!
+        const usdc = await extractInitialUsdcAmount(poolKeys.baseMint.toString(), null);
 
-        if (liquidity) {
-          const wsolAmount = new TokenAmount(this.quoteToken, liquidity.wsolAdded);
+        if (usdc) {
+          const usdcAmount = new TokenAmount(getToken('USDC'), usdc);
 
-          inRange = wsolAmount.raw.gte(this.minInitialLiquidityValue.raw);
+          inRange = usdcAmount.raw.gte(this.minInitialLiquidityValue.raw);
 
           if (!inRange) {
             return {
               ok: false,
-              message: `InitialLiquidityValue -> Initial liquidity value ${wsolAmount.toFixed()} < ${this.minInitialLiquidityValue.toFixed()}`,
+              message: `InitialLiquidityValue -> Initial liquidity value ${usdcAmount.toFixed()} < ${this.minInitialLiquidityValue.toFixed()}`,
             };
           }
         } else {

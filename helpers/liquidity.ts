@@ -1,14 +1,7 @@
 import { PublicKey } from '@solana/web3.js';
 import { Liquidity, LiquidityPoolKeys, LiquidityStateV4, MAINNET_PROGRAM_ID, Market } from '@raydium-io/raydium-sdk';
 import { MinimalMarketLayoutV3 } from './market';
-
-// fixme: check addresses
-// Programmi Raydium rilevanti per Add Liquidity
-const RAYDIUM_LIQUIDITY_POOL_PROGRAM_ID_V4 = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
-const RAYDIUM_AMM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
-
-// fixme:
-const WSOL_ADDRESS = new PublicKey('So11111111111111111111111111111111111111112');
+import * as puppeteer from 'puppeteer';
 
 export function createPoolKeys(
   id: PublicKey,
@@ -50,229 +43,239 @@ export function createPoolKeys(
   };
 }
 
-
-
-// Funzione principale del bot
-export async function analyzeAddLiquidityForToken(connection, tokenAddress, quoteToken) {
-  try {
-    console.log(`Analisi delle transazioni di add liquidity per il token: ${tokenAddress}`);
-
-    // Converti l'indirizzo in un oggetto PublicKey
-    const tokenPublicKey = new PublicKey(tokenAddress);
-
-    // Ottieni le transazioni di add liquidity per il token usando solo l'API di Solana
-    const signatures = await getAddLiquidityTransactionsForToken(connection, tokenPublicKey, quoteToken);
-
-    if (!signatures || signatures.length === 0) {
-      console.log('Nessuna transazione di add liquidity trovata per questo token');
-      return null;
-    }
-
-    console.log(`Trovate ${signatures.length} transazioni di add liquidity`);
-
-    // Analizza la transazione più recente (o potresti implementare un ciclo per analizzarle tutte)
-    const latestSignature = signatures[0];
-    return await analyzeTransaction(connection, latestSignature, tokenPublicKey);
-
-  } catch (error) {
-    console.error('Errore nell\'analisi del token:', error);
-    return null;
-  }
+interface ProxyConfig {
+  server: string;
+  username?: string;
+  password?: string;
 }
 
-// Funzione per ottenere le transazioni di add liquidity per un token specifico
-export async function getAddLiquidityTransactionsForToken(connection, tokenPublicKey, quoteToken) {
-  try {
-    console.log(`Cercando transazioni per il token: ${tokenPublicKey.toString()}`);
+/**
+ * Estrae la quantità di WSOL depositata per un token specificato
+ * @param tokenAddress Indirizzo del token Solana da analizzare
+ * @param proxy Configurazione proxy opzionale
+ * @returns La quantità di WSOL come numero o null se non trovato
+ */
+export async function extractInitialUsdcAmount(tokenAddress: string, proxy?: ProxyConfig): Promise<number | null> {
+  console.debug('Inizializzazione del browser...');
 
-    // Ottieni le transazioni più recenti che coinvolgono questo token
-    const recentSignatures = await connection.getSignaturesForAddress(
-      tokenPublicKey,
-      { limit: 100 } // Puoi aumentare questo limite se necessario
-    );
+  // Configurazione del browser con supporto proxy
+  const args = ['--no-sandbox', '--disable-dev-shm-usage', '--window-size=1920,1080'];
 
-    console.log(`Trovate ${recentSignatures.length} transazioni recenti per il token`);
-
-    // Array per memorizzare le signature di add liquidity
-    const addLiquiditySignatures = [];
-
-    // Per ogni signature, ottieni i dettagli della transazione per verificare se è add liquidity
-    for (const sigInfo of recentSignatures) {
-      try {
-        const txInfo = await connection.getParsedTransaction(sigInfo.signature, {
-          commitment: 'confirmed',
-          maxSupportedTransactionVersion: 0
-        });
-
-        if (!txInfo || !txInfo.meta) continue;
-
-        // Verifica se la transazione coinvolge il programma di liquidità di Raydium
-        const isRaydiumLiquidityTx = txInfo.transaction.message.instructions.some(
-          inst => inst.programId &&
-            (inst.programId.equals(RAYDIUM_LIQUIDITY_POOL_PROGRAM_ID_V4) ||
-              inst.programId.equals(RAYDIUM_AMM_PROGRAM_ID))
-        );
-
-        // Verifica se la transazione ha modificato il saldo del token specifico
-        // e se il saldo è diminuito (indicando un possibile add liquidity)
-        const preTokenBalances = txInfo.meta.preTokenBalances || [];
-        const postTokenBalances = txInfo.meta.postTokenBalances || [];
-
-        // Verifica se WSOL è coinvolto nella transazione
-        const wsolInvolved = [...preTokenBalances, ...postTokenBalances].some(
-          balance => balance.mint === quoteToken.mint.toString()
-        );
-
-        // Verifica se questa è una transazione di add liquidity
-        // basata su: programma Raydium coinvolto + WSOL coinvolto + struttura dei cambiamenti nei saldi
-        if (isRaydiumLiquidityTx && wsolInvolved) {
-          // Ulteriore analisi per confermare che sia un'operazione di add liquidity
-          // Verifica se c'è un pattern di saldo tipico di add liquidity
-          // (questa è una logica semplificata, potresti dover raffinarla)
-
-          const tokenBalances = { pre: {}, post: {} };
-
-          // Raccogli i saldi pre-transazione
-          preTokenBalances.forEach(balance => {
-            const mint = balance.mint;
-            if (!tokenBalances.pre[mint]) tokenBalances.pre[mint] = 0;
-            tokenBalances.pre[mint] += parseFloat(balance.uiTokenAmount.uiAmount || 0);
-          });
-
-          // Raccogli i saldi post-transazione
-          postTokenBalances.forEach(balance => {
-            const mint = balance.mint;
-            if (!tokenBalances.post[mint]) tokenBalances.post[mint] = 0;
-            tokenBalances.post[mint] += parseFloat(balance.uiTokenAmount.uiAmount || 0);
-          });
-
-          // Verifica se il saldo di WSOL è diminuito (indicando add liquidity)
-          const wsolPreBalance = tokenBalances.pre[WSOL_ADDRESS.toString()] || 0;
-          const wsolPostBalance = tokenBalances.post[WSOL_ADDRESS.toString()] || 0;
-
-          if (wsolPreBalance > wsolPostBalance) {
-            console.log(`Probabile transazione di add liquidity trovata: ${sigInfo.signature}`);
-            addLiquiditySignatures.push(sigInfo.signature);
-          }
-        }
-      } catch (txError) {
-        console.log(`Errore nell'analisi della transazione ${sigInfo.signature}: ${txError.message}`);
-        // Continua con la prossima transazione
-      }
+  // Aggiunge configurazione proxy se specificata
+  if (proxy) {
+    if (proxy.username && proxy.password) {
+      args.push(`--proxy-server=${proxy.server}`);
+    } else {
+      args.push(`--proxy-server=${proxy.server}`);
     }
-
-    return addLiquiditySignatures;
-
-  } catch (error) {
-    console.error('Errore nel recupero delle transazioni:', error);
-    return [];
   }
-}
 
-// Funzione per analizzare una transazione specifica
-export async function analyzeTransaction(connection, signature, tokenPublicKey) {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args,
+  });
+
   try {
-    console.log(`Analisi dettagliata della transazione: ${signature}`);
+    // Costruzione dell'URL con l'indirizzo del token
+    const url = `https://solscan.io/token/${tokenAddress}?activity_type=ACTIVITY_TOKEN_ADD_LIQ#defiactivities`;
+    console.debug(`Accesso a: ${url}`);
 
-    // Ottieni i dettagli completi della transazione
-    const txInfo = await connection.getParsedTransaction(signature, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0
-    });
+    // Apertura della pagina
+    const page = await browser.newPage();
 
-    if (!txInfo || !txInfo.meta) {
-      console.error('Transazione non trovata o dettagli insufficienti');
-      return null;
+    // Imposta autenticazione proxy se necessario
+    if (proxy && proxy.username && proxy.password) {
+      await page.authenticate({
+        username: proxy.username,
+        password: proxy.password,
+      });
     }
 
-    // Analisi dei saldi pre e post transazione
-    const preTokenBalances = txInfo.meta.preTokenBalances || [];
-    const postTokenBalances = txInfo.meta.postTokenBalances || [];
+    await page.setViewport({ width: 1920, height: 1080 });
 
-    // Trova WSOL tra i token coinvolti
-    const wsolPreBalances = preTokenBalances.filter(
-      balance => balance.mint === WSOL_ADDRESS.toString()
-    );
-
-    const wsolPostBalances = postTokenBalances.filter(
-      balance => balance.mint === WSOL_ADDRESS.toString()
-    );
-
-    // Calcola la quantità di WSOL aggiunta alla liquidità
-    let totalWsolAdded = 0;
-
-    // Mappa per tenere traccia dei saldi pre-transazione
-    const preBalanceMap = {};
-    wsolPreBalances.forEach(balance => {
-      const owner = balance.owner;
-      if (!preBalanceMap[owner]) preBalanceMap[owner] = 0;
-      preBalanceMap[owner] += parseFloat(balance.uiTokenAmount.uiAmount || 0);
+    // Imposta un timeout ragionevole per il caricamento della pagina
+    await page.goto(url, {
+      waitUntil: 'networkidle2',
+      timeout: 30000,
     });
 
-    // Mappa per tenere traccia dei saldi post-transazione
-    const postBalanceMap = {};
-    wsolPostBalances.forEach(balance => {
-      const owner = balance.owner;
-      if (!postBalanceMap[owner]) postBalanceMap[owner] = 0;
-      postBalanceMap[owner] += parseFloat(balance.uiTokenAmount.uiAmount || 0);
-    });
+    // Attesa per il caricamento della pagina
+    console.debug('Attesa per il caricamento della pagina...');
+    await new Promise((resolve) => setTimeout(resolve, 4000));
 
-    // Calcola la differenza per ogni account
-    for (const owner in preBalanceMap) {
-      const preAmount = preBalanceMap[owner] || 0;
-      const postAmount = postBalanceMap[owner] || 0;
+    console.debug('Cercando la quantità di WSOL nella tabella...');
 
-      // Se il saldo è diminuito, significa che WSOL è stato aggiunto alla liquidità
-      if (preAmount > postAmount) {
-        totalWsolAdded += (preAmount - postAmount);
-      }
-    }
+    // Ottieni una mappa dettagliata della struttura della tabella per debug
+    const tableStructure = await page.evaluate(() => {
+      const result: { rowIndex: number; data: string[] }[] = [];
+      const rows = document.querySelectorAll('table tr');
 
-    // Se non riusciamo a determinare la quantità dai saldi, cerchiamo di estrarre informazioni dalle istruzioni
-    if (totalWsolAdded === 0) {
-      console.log('Tentativo di analisi dalle istruzioni della transazione...');
+      rows.forEach((row, rowIndex) => {
+        if ((row.textContent || '').includes('WSOL')) {
+          const cells = row.querySelectorAll('td');
+          const cellsData: string[] = [];
 
-      // Trova istruzioni relative a Raydium
-      const raydiumInstructions = txInfo.transaction.message.instructions.filter(
-        inst => inst.programId &&
-          (inst.programId.equals(RAYDIUM_LIQUIDITY_POOL_PROGRAM_ID_V4) ||
-            inst.programId.equals(RAYDIUM_AMM_PROGRAM_ID))
-      );
+          cells.forEach((cell) => {
+            cellsData.push(cell.textContent?.trim() || '');
+          });
 
-      // Se disponibili dettagli sulle log della transazione, possiamo analizzarli per ulteriori informazioni
-      if (txInfo.meta.logMessages && txInfo.meta.logMessages.length > 0) {
-        for (const log of txInfo.meta.logMessages) {
-          // Cerca pattern tipici dei log di add liquidity di Raydium
-          if (log.includes('Program log: Instruction: AddLiquidity') ||
-            log.includes('Program log: Add Liquidity')) {
-            console.log('Trovato log di add liquidity:', log);
-            // Potrebbe essere necessario un parser personalizzato per estrarre la quantità dai log
-          }
-
-          // Cerca numeri che potrebbero indicare l'importo di WSOL
-          const amountMatch = log.match(/amount: (\d+(\.\d+)?)/i);
-          if (amountMatch) {
-            console.log('Possibile importo trovato nei log:', amountMatch[1]);
-          }
+          result.push({
+            rowIndex,
+            data: cellsData,
+          });
         }
-      }
+      });
+
+      return result;
+    });
+
+    console.debug('Struttura dettagliata delle righe con WSOL:');
+    console.debug(JSON.stringify(tableStructure, null, 2));
+
+    const rawUsdcValue = tableStructure[0]['data'][6];
+    if (!rawUsdcValue) {
+      console.log('Prezzo non trovato');
+      throw new Error('USDC non trovato');
     }
 
-    // Restituisci i risultati
-    const result = {
-      signature,
-      tokenAddress: tokenPublicKey.toString(),
-      wsolAdded: totalWsolAdded,
-      timestamp: txInfo.blockTime ? new Date(txInfo.blockTime * 1000).toISOString() : 'Unknown',
-      success: txInfo.meta.err === null,
-      blockTime: txInfo.blockTime
-    };
+    let usdcAmount = null;
 
-    console.log('Risultato dell\'analisi:', result);
-    return result;
+    const regex = /\$(\d+(?:,\d{3})*(?:\.\d{2})?)/;
+    const match = tableStructure[0][6].match(regex);
+    if (match) {
+      const valoreStr = match[1];            // '13.95'
+      usdcAmount = parseFloat(valoreStr.replace(/,/g, '')); // 13.95
+    } else {
+      console.log('Prezzo non trovato');
+      throw new Error('USDC non trovato');
+    }
 
+    console.debug('Liquidita aggiunta in USDC:');
+    console.debug(usdcAmount);
+
+    return usdcAmount;
+
+    // // Analizziamo la struttura per trovare il valore corretto
+    // // Strategia 1: Cerca specificamente nella colonna Amount
+    // const wsolAmount = await page.evaluate(() => {
+    //   const rows = document.querySelectorAll('table tr');
+    //   let wsolValue: number | null = null;
+    //
+    //   // Trova l'indice dell'intestazione Amount
+    //   let amountColumnIndex = -1;
+    //   const headers = document.querySelectorAll('th');
+    //   headers.forEach((header, index) => {
+    //     if ((header.textContent || '').includes('Amount')) {
+    //       amountColumnIndex = index;
+    //     }
+    //   });
+    //
+    //   // Se abbiamo trovato l'indice della colonna Amount
+    //   if (amountColumnIndex >= 0) {
+    //     for (const row of Array.from(rows)) {
+    //       if ((row.textContent || '').includes('WSOL')) {
+    //         const cells = row.querySelectorAll('td');
+    //         if (cells.length > amountColumnIndex) {
+    //           const amountCell = cells[amountColumnIndex];
+    //           const amountText = amountCell.textContent || '';
+    //
+    //           // Se la cella contiene "WSOL", probabilmente contiene il valore
+    //           if (amountText.includes('WSOL')) {
+    //             // Cerca solo il numero prima di "WSOL"
+    //             const match = amountText.match(/(\d+)\s*WSOL/);
+    //             if (match && match[1]) {
+    //               return parseFloat(match[1]);
+    //             }
+    //           }
+    //         }
+    //       }
+    //     }
+    //   }
+    //
+    //   // Strategia 2: Cerca nelle celle che contengono sia numeri che "WSOL"
+    //   for (const row of Array.from(rows)) {
+    //     if ((row.textContent || '').includes('ADD LIQUIDITY') && (row.textContent || '').includes('WSOL')) {
+    //       const cells = row.querySelectorAll('td');
+    //
+    //       for (const cell of Array.from(cells)) {
+    //         const cellText = cell.textContent || '';
+    //         if (cellText.includes('WSOL')) {
+    //           // Cerca numeri seguiti dalla parola WSOL
+    //           const wsolMatch = cellText.match(/(\d+)\s*WSOL/i);
+    //           if (wsolMatch && wsolMatch[1]) {
+    //             return parseFloat(wsolMatch[1]);
+    //           }
+    //         }
+    //       }
+    //     }
+    //   }
+    //
+    //   // Strategia 3: Cerca "WSOL" e poi prendi il primo numero vicino
+    //   const wsolElement = document.evaluate(
+    //     "//td[contains(., 'WSOL') and not(contains(., 'TNACOIN'))]",
+    //     document,
+    //     null,
+    //     XPathResult.FIRST_ORDERED_NODE_TYPE,
+    //     null,
+    //   ).singleNodeValue;
+    //
+    //   if (wsolElement) {
+    //     const text = wsolElement.textContent || '';
+    //     // Trova il numero prima di "WSOL"
+    //     const match = text.match(/(\d+)\s*WSOL/);
+    //     if (match && match[1]) {
+    //       return parseFloat(match[1]);
+    //     }
+    //   }
+    //
+    //   return null;
+    // });
+
+    // if (wsolAmount !== null) {
+    //   console.debug(`\n===========================================`);
+    //   console.debug(`RISULTATO FINALE - Quantità WSOL: ${wsolAmount}`);
+    //   console.debug(`===========================================\n`);
+    //
+    //   return wsolAmount;
+    // } else {
+    //   // Se non trova, cattura e stampa il contenuto completo della riga
+    //   console.debug('Eseguendo analisi dettagliata della pagina...');
+    //
+    //   // Ottieni il DOM della riga specifica
+    //   const rowHtml = await page.evaluate(() => {
+    //     const wsolRow = Array.from(document.querySelectorAll('tr')).find(
+    //       (row) => (row.textContent || '').includes('ADD LIQUIDITY') && (row.textContent || '').includes('WSOL'),
+    //     );
+    //
+    //     return wsolRow ? wsolRow.outerHTML : null;
+    //   });
+    //
+    //   if (rowHtml) {
+    //     console.debug('HTML della riga trovato:');
+    //     console.debug(rowHtml);
+    //
+    //     // Estrazione manuale dalla struttura HTML
+    //     // Cerchiamo specificamente il valore "4" accanto a "WSOL"
+    //     const wsolMatch = rowHtml.match(/(\d+)\s*WSOL/i);
+    //     if (wsolMatch && wsolMatch[1]) {
+    //       const extractedAmount = parseFloat(wsolMatch[1]);
+    //       console.debug(`\n===========================================`);
+    //       console.debug(`RISULTATO FINALE (estrazione manuale) - Quantità WSOL: ${extractedAmount}`);
+    //       console.debug(`===========================================\n`);
+    //
+    //       return extractedAmount;
+    //     }
+    //   }
+    //
+    //   console.debug('Nessun valore WSOL trovato nella pagina.');
+    //   return null;
+    // }
   } catch (error) {
-    console.error('Errore durante l\'analisi della transazione:', error);
+    console.error(`Errore generale: ${error instanceof Error ? error.message : String(error)}`);
     return null;
+  } finally {
+    // Chiusura del browser
+    console.debug('Chiusura del browser...');
+    await browser.close();
   }
 }

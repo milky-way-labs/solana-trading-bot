@@ -124,7 +124,7 @@ Note: When using snipe list filters below will be disabled.
   - Set `0` to disable.
 - `MAX_POOL_SIZE` - Bot will buy only if the pool size is less than or equal the specified amount.
   - Set `0` to disable.
-- `MIN_INITIAL_LIQUIDITY_VALUE` - Bot will buy only if the initial QUOTE_AMOUNT liquidity value provided by 'ADD LIQUIDITY' transactions is less than or equal the specified amount.
+- `MIN_INITIAL_LIQUIDITY_VALUE` - Bot will buy only if the initial USDC QUOTE_AMOUNT liquidity value provided by 'ADD LIQUIDITY' transactions is less than or equal the specified amount.
   - Set `0` to disable.
 - `BLACKLIST_REFRESH_INTERVAL` - Interval in milliseconds to refresh the blacklist.
   - Blacklist checks update authority metadata of token, for "creator" wallets. 
