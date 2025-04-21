@@ -42,7 +42,7 @@ RUN \
         lsb-release  \
         wget  \
         xdg-utils \
-    ; \
+    ;
 
 WORKDIR /var/www/html
 
