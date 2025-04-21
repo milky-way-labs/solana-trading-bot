@@ -38,7 +38,7 @@ export class InitialLiquidityUsdcValueFilter implements Filter {
       logger.error(
         {
           mint: poolKeys.baseMint,
-          error: JSON.stringify(error),
+          error: error,
         },
         `Failed to check initial liquidity value`,
       );
