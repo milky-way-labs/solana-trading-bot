@@ -18,7 +18,7 @@ export class InitialLiquidityUsdcValueFilter implements Filter {
         const usdc = await extractInitialUsdcAmount(poolKeys.baseMint.toString(), null);
 
         if (usdc) {
-          const usdcAmount = new TokenAmount(getToken('USDC'), usdc);
+          const usdcAmount = new TokenAmount(getToken('USDC'), usdc, false);
 
           inRange = usdcAmount.raw.gte(this.minInitialLiquidityValue.raw);
 
