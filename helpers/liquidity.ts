@@ -101,7 +101,7 @@ export async function extractInitialUsdcAmount(tokenAddress: string, proxy?: Pro
 
     // Attesa per il caricamento della pagina
     console.debug('Attesa per il caricamento della pagina...');
-    await new Promise((resolve) => setTimeout(resolve, 4000));
+    await new Promise((resolve) => setTimeout(resolve, 8000));
 
     console.debug('Cercando la quantità di WSOL nella tabella...');
 
