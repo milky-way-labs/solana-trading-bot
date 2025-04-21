@@ -141,7 +141,7 @@ export async function extractInitialUsdcAmount(tokenAddress: string, proxy?: Pro
     let usdcAmount = null;
 
     const regex = /\$(\d+(?:,\d{3})*(?:\.\d{2})?)/;
-    const match = tableStructure[0][6].match(regex);
+    const match = tableStructure[0]['data'][6].match(regex);
     if (match) {
       const valoreStr = match[1];            // '13.95'
       usdcAmount = parseFloat(valoreStr.replace(/,/g, '')); // 13.95
