@@ -4,7 +4,7 @@ FROM node:$node_version as base
 
 RUN \
     apt-get update; \
-    apt-get install \
+    apt-get install -y \
         ca-certificates  \
         fonts-liberation  \
         libappindicator3-1  \
