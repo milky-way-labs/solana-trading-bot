@@ -29,7 +29,8 @@ export class InitialLiquidityUsdcValueFilter implements Filter {
             };
           }
         } else {
-          logger.warn({ mint: poolKeys.baseMint }, `Failed to check initial liquidity value`);
+          logger.error({ mint: poolKeys.baseMint }, `Failed to check initial liquidity value`);
+          throw new Error('Cannot read initial liquidity value');
         }
       }
 
