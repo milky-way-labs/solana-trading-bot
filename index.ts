@@ -204,7 +204,7 @@ const runListener = async () => {
     quoteAta: getAssociatedTokenAddressSync(quoteToken.mint, wallet.publicKey),
     minPoolSize: new TokenAmount(quoteToken, MIN_POOL_SIZE, false),
     maxPoolSize: new TokenAmount(quoteToken, MAX_POOL_SIZE, false),
-    minInitialLiquidityValue: new TokenAmount(quoteToken, MIN_INITIAL_LIQUIDITY_VALUE, false),
+    minInitialLiquidityValue: new TokenAmount(getToken('USDC'), MIN_INITIAL_LIQUIDITY_VALUE, false),  // fixme: wsol
     quoteToken,
     quoteAmount: new TokenAmount(quoteToken, QUOTE_AMOUNT, false),
     maxTokensAtTheTime: MAX_TOKENS_AT_THE_TIME,
