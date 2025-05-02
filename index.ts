@@ -6,74 +6,74 @@ import { AccountLayout, getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { Bot, BotConfig } from './bot';
 import { DefaultTransactionExecutor, TransactionExecutor } from './transactions';
 import {
-  getToken,
-  getWallet,
-  logger,
-  COMMITMENT_LEVEL,
-  RPC_ENDPOINT,
-  RPC_WEBSOCKET_ENDPOINT,
-  PRE_LOAD_EXISTING_MARKETS,
-  LOG_LEVEL,
-  QUOTE_MINT,
-  MAX_POOL_SIZE,
-  MIN_POOL_SIZE,
-  MIN_INITIAL_LIQUIDITY_VALUE,
-  QUOTE_AMOUNT,
-  PRIVATE_KEY,
-  USE_SNIPE_LIST,
-  AUTO_SELL_DELAY,
-  MAX_SELL_RETRIES,
-  AUTO_SELL,
-  MAX_BUY_RETRIES,
   AUTO_BUY_DELAY,
-  MAX_BUY_DURATION,
-  COMPUTE_UNIT_LIMIT,
-  COMPUTE_UNIT_PRICE,
-  CACHE_NEW_MARKETS,
-  TAKE_PROFIT,
-  STOP_LOSS,
-  BUY_SLIPPAGE,
-  SELL_SLIPPAGE,
-  PRICE_CHECK_DURATION,
-  PRICE_CHECK_INTERVAL,
-  SNIPE_LIST_REFRESH_INTERVAL,
-  TRANSACTION_EXECUTOR,
-  CUSTOM_FEE,
-  FILTER_CHECK_INTERVAL,
-  FILTER_CHECK_DURATION,
-  CONSECUTIVE_FILTER_MATCHES,
-  MAX_TOKENS_AT_THE_TIME,
-  CHECK_IF_MINT_IS_RENOUNCED,
-  CHECK_IF_FREEZABLE,
-  CHECK_IF_BURNED,
-  CHECK_IF_MUTABLE,
-  CHECK_IF_SOCIALS,
-  TRAILING_STOP_LOSS,
-  SKIP_SELLING_IF_LOST_MORE_THAN,
-  MAX_LAG,
-  CHECK_HOLDERS,
-  CHECK_ABNORMAL_DISTRIBUTION,
-  CHECK_TOKEN_DISTRIBUTION,
-  TELEGRAM_CHAT_ID,
-  TELEGRAM_THREAD_ID,
-  BLACKLIST_REFRESH_INTERVAL,
-  MACD_SHORT_PERIOD,
-  MACD_LONG_PERIOD,
-  MACD_SIGNAL_PERIOD,
-  RSI_PERIOD,
-  TELEGRAM_BOT_TOKEN,
+  AUTO_SELL,
+  AUTO_SELL_DELAY,
   AUTO_SELL_WITHOUT_SELL_SIGNAL,
-  BUY_SIGNAL_TIME_TO_WAIT,
-  BUY_SIGNAL_PRICE_INTERVAL,
+  BLACKLIST_REFRESH_INTERVAL,
   BUY_SIGNAL_FRACTION_TIME_TO_WAIT,
   BUY_SIGNAL_LOW_VOLUME_THRESHOLD,
+  BUY_SIGNAL_PRICE_INTERVAL,
+  BUY_SIGNAL_TIME_TO_WAIT,
+  BUY_SLIPPAGE,
+  CACHE_NEW_MARKETS,
+  CHECK_ABNORMAL_DISTRIBUTION,
+  CHECK_HOLDERS,
+  CHECK_IF_BURNED,
+  CHECK_IF_FREEZABLE,
+  CHECK_IF_MINT_IS_RENOUNCED,
+  CHECK_IF_MUTABLE,
+  CHECK_IF_SOCIALS,
+  CHECK_TOKEN_DISTRIBUTION,
+  COMMITMENT_LEVEL,
+  COMPUTE_UNIT_LIMIT,
+  COMPUTE_UNIT_PRICE,
+  CONSECUTIVE_FILTER_MATCHES,
+  CUSTOM_FEE,
+  FILTER_CHECK_DURATION,
+  FILTER_CHECK_INTERVAL,
+  getToken,
+  getWallet,
+  LOG_LEVEL,
+  logger,
+  MACD_LONG_PERIOD,
+  MACD_SHORT_PERIOD,
+  MACD_SIGNAL_PERIOD,
+  MAX_BUY_DURATION,
+  MAX_BUY_RETRIES,
+  MAX_LAG,
+  MAX_POOL_SIZE,
+  MAX_SELL_RETRIES,
+  MAX_TOKENS_AT_THE_TIME,
+  MIN_INITIAL_LIQUIDITY_VALUE,
+  MIN_POOL_SIZE,
+  PRE_LOAD_EXISTING_MARKETS,
+  PRICE_CHECK_DURATION,
+  PRICE_CHECK_INTERVAL,
+  PRIVATE_KEY,
+  QUOTE_AMOUNT,
+  QUOTE_MINT,
+  RPC_ENDPOINT,
+  RPC_WEBSOCKET_ENDPOINT,
+  RSI_PERIOD,
+  SELL_SLIPPAGE,
+  SKIP_SELLING_IF_LOST_MORE_THAN,
+  SNIPE_LIST_REFRESH_INTERVAL,
+  STOP_LOSS,
+  TAKE_PROFIT,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_CHAT_ID,
+  TELEGRAM_THREAD_ID,
+  TRAILING_STOP_LOSS,
+  TRANSACTION_EXECUTOR,
+  USE_SNIPE_LIST,
+  USE_TA,
   USE_TELEGRAM,
-  USE_TA
 } from './helpers';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
 import { TechnicalAnalysisCache } from './cache/technical-analysis.cache';
-import { logBuy } from './db';
+import { logFind } from './db';
 
 const connection = new Connection(RPC_ENDPOINT, {
   wsEndpoint: RPC_WEBSOCKET_ENDPOINT,
@@ -160,14 +160,14 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
     logger.info(`Min initial liquidity value: ${botConfig.minInitialLiquidityValue.toFixed()}`);
   }
 
-  logger.info(`Check Holders: ${botConfig.checkHolders}`);    
+  logger.info(`Check Holders: ${botConfig.checkHolders}`);
   logger.info(`Check Token Distribution: ${botConfig.checkTokenDistribution}`);
   logger.info(`Check Abnormal Distribution: ${botConfig.checkAbnormalDistribution}`);
   logger.info(`Blacklist refresh interval: ${BLACKLIST_REFRESH_INTERVAL}`);
 
   logger.info(`Buy signal MACD: ${MACD_SHORT_PERIOD}/${MACD_LONG_PERIOD}/${MACD_SIGNAL_PERIOD}`);
   logger.info(`Buy signal RSI: ${RSI_PERIOD}`);
-  
+
   logger.info('------- CONFIGURATION END -------');
 
   logger.info('Bot is running! Press CTRL + C to stop it.');
@@ -205,7 +205,7 @@ const runListener = async () => {
     quoteAta: getAssociatedTokenAddressSync(quoteToken.mint, wallet.publicKey),
     minPoolSize: new TokenAmount(quoteToken, MIN_POOL_SIZE, false),
     maxPoolSize: new TokenAmount(quoteToken, MAX_POOL_SIZE, false),
-    minInitialLiquidityValue: new TokenAmount(getToken('USDC'), MIN_INITIAL_LIQUIDITY_VALUE, false),  // fixme: wsol
+    minInitialLiquidityValue: new TokenAmount(getToken('USDC'), MIN_INITIAL_LIQUIDITY_VALUE, false), // fixme: wsol
     quoteToken,
     quoteAmount: new TokenAmount(quoteToken, QUOTE_AMOUNT, false),
     maxTokensAtTheTime: MAX_TOKENS_AT_THE_TIME,
@@ -229,11 +229,11 @@ const runListener = async () => {
     filterCheckInterval: FILTER_CHECK_INTERVAL,
     filterCheckDuration: FILTER_CHECK_DURATION,
     consecutiveMatchCount: CONSECUTIVE_FILTER_MATCHES,
-    checkHolders:CHECK_HOLDERS,
-    checkTokenDistribution:CHECK_TOKEN_DISTRIBUTION,
-    checkAbnormalDistribution:CHECK_ABNORMAL_DISTRIBUTION,
-    telegramChatId:TELEGRAM_CHAT_ID,
-    telegramThreadId:TELEGRAM_THREAD_ID,
+    checkHolders: CHECK_HOLDERS,
+    checkTokenDistribution: CHECK_TOKEN_DISTRIBUTION,
+    checkAbnormalDistribution: CHECK_ABNORMAL_DISTRIBUTION,
+    telegramChatId: TELEGRAM_CHAT_ID,
+    telegramThreadId: TELEGRAM_THREAD_ID,
     telegramBotToken: TELEGRAM_BOT_TOKEN,
     blacklistRefreshInterval: BLACKLIST_REFRESH_INTERVAL,
     MACDLongPeriod: MACD_LONG_PERIOD,
@@ -246,7 +246,7 @@ const runListener = async () => {
     buySignalFractionPercentageTimeToWait: BUY_SIGNAL_FRACTION_TIME_TO_WAIT,
     buySignalLowVolumeThreshold: BUY_SIGNAL_LOW_VOLUME_THRESHOLD,
     useTelegram: USE_TELEGRAM,
-    useTechnicalAnalysis: USE_TA
+    useTechnicalAnalysis: USE_TA,
   };
 
   const bot = new Bot(connection, marketCache, poolCache, txExecutor, technicalAnalysisCache, botConfig);
@@ -286,9 +286,9 @@ const runListener = async () => {
     if (!exists && poolOpenTime > runTimestamp) {
       poolCache.save(updatedAccountInfo.accountId.toString(), poolState);
 
-      await logBuy(poolState.baseMint.toString());
-      
-      if(MAX_LAG != 0 && lag > MAX_LAG){
+      await logFind(poolState.baseMint.toString(), new Date(poolOpenTime));
+
+      if (MAX_LAG != 0 && lag > MAX_LAG) {
         logger.trace(`Lag too high: ${lag} sec`);
         return;
       } else {
@@ -312,4 +312,3 @@ const runListener = async () => {
 };
 
 runListener();
-
