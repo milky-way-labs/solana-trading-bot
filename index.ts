@@ -288,13 +288,13 @@ const runListener = async () => {
 
       await logBuy(poolState.baseMint.toString());
       
-      if(MAX_LAG != 0 && lag > MAX_LAG){
-        logger.trace(`Lag too high: ${lag} sec`);
-        return;
-      } else {
-        logger.trace(`Lag: ${lag} sec`);
-        await bot.buy(updatedAccountInfo.accountId, poolState, lag);
-      }
+      // if(MAX_LAG != 0 && lag > MAX_LAG){
+      //   logger.trace(`Lag too high: ${lag} sec`);
+      //   return;
+      // } else {
+      //   logger.trace(`Lag: ${lag} sec`);
+      //   await bot.buy(updatedAccountInfo.accountId, poolState, lag);
+      // }
     }
   });
 
