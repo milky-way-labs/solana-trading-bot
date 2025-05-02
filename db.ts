@@ -13,6 +13,12 @@ export class Trade {
   tokenAddress: string;
 
   @Column()
+  findDateTime: Date;
+
+  @Column()
+  poolOpenDateTime: Date;
+
+  @Column()
   buyDateTime: Date;
 
   @Column({ nullable: true })
@@ -40,17 +46,37 @@ export async function initDB() {
   }
 }
 
-export async function logBuy(tokenAddress: string): Promise<void> {
+export async function logFind(tokenAddress: string, poolOpenDateTime: Date): Promise<void> {
   if (!MONGODB_URI) return;
   if (!connection) await initDB();
 
   const repo = getMongoRepository(Trade);
   const trade = new Trade();
   trade.tokenAddress = tokenAddress;
-  trade.buyDateTime = new Date();
+  trade.findDateTime = new Date();
+  trade.poolOpenDateTime = poolOpenDateTime;
   trade.instanceId = INSTANCE_ID;
 
   await repo.save(trade);
+}
+
+export async function logBuy(tokenAddress: string): Promise<void> {
+  if (!MONGODB_URI) return;
+  if (!connection) await initDB();
+
+  const repo = getMongoRepository(Trade);
+  const trade = await repo.findOne({
+    where: {
+      tokenAddress,
+      buyDateTime: null,
+      instanceId: INSTANCE_ID
+    }
+  });
+
+  if (trade) {
+    trade.buyDateTime = new Date();
+    await repo.save(trade);
+  }
 }
 
 export async function logSell(tokenAddress: string, gainLossPercentage: number): Promise<void> {

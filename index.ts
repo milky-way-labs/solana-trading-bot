@@ -73,6 +73,7 @@ import {
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
 import { TechnicalAnalysisCache } from './cache/technical-analysis.cache';
+import { logBuy } from './db';
 
 const connection = new Connection(RPC_ENDPOINT, {
   wsEndpoint: RPC_WEBSOCKET_ENDPOINT,
@@ -284,6 +285,8 @@ const runListener = async () => {
 
     if (!exists && poolOpenTime > runTimestamp) {
       poolCache.save(updatedAccountInfo.accountId.toString(), poolState);
+
+      await logBuy(poolState.baseMint.toString());
       
       if(MAX_LAG != 0 && lag > MAX_LAG){
         logger.trace(`Lag too high: ${lag} sec`);
