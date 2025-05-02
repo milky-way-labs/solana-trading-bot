@@ -286,15 +286,15 @@ const runListener = async () => {
     if (!exists && poolOpenTime > runTimestamp) {
       poolCache.save(updatedAccountInfo.accountId.toString(), poolState);
 
-      await logFind(poolState.baseMint.toString(), new Date(poolOpenTime * 1000));
-
-      if (MAX_LAG != 0 && lag > MAX_LAG) {
-        logger.trace(`Lag too high: ${lag} sec`);
-        return;
-      } else {
-        logger.trace(`Lag: ${lag} sec`);
-        await bot.buy(updatedAccountInfo.accountId, poolState, lag);
-      }
+      await logFind(poolState.baseMint.toString(), new Date(poolOpenTime));
+      
+      // if(MAX_LAG != 0 && lag > MAX_LAG){
+      //   logger.trace(`Lag too high: ${lag} sec`);
+      //   return;
+      // } else {
+      //   logger.trace(`Lag: ${lag} sec`);
+      //   await bot.buy(updatedAccountInfo.accountId, poolState, lag);
+      // }
     }
   });
 
