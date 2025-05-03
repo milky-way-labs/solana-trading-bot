@@ -5,17 +5,53 @@ import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { EventEmitter } from 'events';
 import { sha256 } from 'js-sha256';
 import { logger } from '../helpers';
+import { struct, u8, blob, ns64 } from '@solana/buffer-layout';
 
-// Definisco direttamente le costanti che servono
+// Program IDs
 const CPMM_PROGRAM_ID = new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C');
+
+// Layout e costanti per CP-Swap
+interface PoolStateLayout {
+  status: number;
+  padding1: Uint8Array;
+  baseMint: Uint8Array;
+  quoteMint: Uint8Array;
+  openTime: bigint;
+}
+
+const POOL_STATE_LAYOUT = struct<PoolStateLayout>([
+  u8('status'), // offset 8 (dopo discriminator), valore attivo = 1
+  blob(7, 'padding1'),
+  blob(32, 'baseMint'), // offset 16
+  blob(32, 'quoteMint'), // offset 48
+  // altri campi...
+  ns64('openTime'), // offset esempio: 160
+]);
+
+// Discriminator per account Pool tipo Anchor
+const POOL_DISCRIMINATOR = bs58.encode(Buffer.from(sha256.digest('account:Pool').slice(0, 8)));
+
+// Offset conosciuti per quote_mint basati su osservazioni reali
+const QUOTE_MINT_OFFSETS = [
+  48,   // offset comune per account di 637 bytes
+  128,  // offset alternativo osservato
+  168,  // offset confermato per SOL
+  256,  // offset alternativo osservato
+  512   // offset alternativo osservato
+];
 
 export class Listeners extends EventEmitter {
   private subscriptions: number[] = [];
+  private startTimestamp: number;
 
   constructor(private readonly connection: Connection) {
     super();
+    this.startTimestamp = Date.now() / 1000; // Unix timestamp in secondi
   }
 
+  /**
+   * Inizializza e avvia tutti i listener necessari
+   */
   public async start(config: {
     walletPublicKey: PublicKey;
     quoteToken: Token;
@@ -27,11 +63,13 @@ export class Listeners extends EventEmitter {
       this.subscriptions.push(openBookSubscription);
     }
 
+    // Legacy AMM v4 pools
     const raydiumSubscription = await this.subscribeToRaydiumPools(config);
     this.subscriptions.push(raydiumSubscription);
 
-    const newPoolsSubscription = await this.subscribeToNewRaydiumPools(config);
-    this.subscriptions.push(newPoolsSubscription);
+    // CP-Swap pools (new Standard AMM)
+    const cpSwapSubscription = await this.subscribeToCPSwapPools(config);
+    this.subscriptions.push(cpSwapSubscription);
 
     if (config.autoSell) {
       const walletSubscription = await this.subscribeToWalletChanges(config);
@@ -39,6 +77,9 @@ export class Listeners extends EventEmitter {
     }
   }
 
+  /**
+   * Sottoscrizione agli OpenBook Markets
+   */
   private async subscribeToOpenBookMarkets(config: { quoteToken: Token }) {
     return this.connection.onProgramAccountChange(
       MAINNET_PROGRAM_ID.OPENBOOK_MARKET,
@@ -58,6 +99,9 @@ export class Listeners extends EventEmitter {
     );
   }
 
+  /**
+   * Sottoscrizione ai pool Raydium AMM v4 (Legacy)
+   */
   private async subscribeToRaydiumPools(config: { quoteToken: Token }) {
     return this.connection.onProgramAccountChange(
       MAINNET_PROGRAM_ID.AmmV4,
@@ -88,36 +132,94 @@ export class Listeners extends EventEmitter {
       ],
     );
   }
-
-  private async subscribeToNewRaydiumPools(config: { quoteToken: Token }) {
-    logger.debug('Subscribing to new Raydium CP-Swap pools (base)');
-
-    // Calcolo del discriminator corretto per l'account "Pool"
-    const rawDisc = sha256.digest('account:Pool').slice(0, 8);
-    const poolDiscriminator = bs58.encode(Buffer.from(rawDisc));
-
-    // Dimensione corretta dell'account Pool: 8 (discriminator) + 363 (struct) = 371
-    const POOL_ACCOUNT_SIZE = 371;
-
-    logger.debug(`Using CP-Swap Program ID: ${CPMM_PROGRAM_ID.toBase58()}`);
-    logger.debug(`Using Pool Account Size: ${POOL_ACCOUNT_SIZE}`);
-    logger.debug(`Using Pool Discriminator (base58): ${poolDiscriminator}`);
-
+  
+  /**
+   * Sottoscrizione ai pool Raydium CP-Swap (Standard AMM)
+   * Utilizza una strategia adattiva per trovare pool con il quoteMint desiderato,
+   * indipendentemente dal layout esatto dell'account.
+   */
+  private async subscribeToCPSwapPools(config: { quoteToken: Token }) {
+    logger.info(`Subscribing to Raydium CP-Swap pools for ${config.quoteToken.symbol || config.quoteToken.mint.toBase58()}`);
+    logger.info(`Using CP-Swap Program ID: ${CPMM_PROGRAM_ID.toBase58()}`);
+    
+    // Manteniamo un registro degli account già elaborati per evitare duplicati
+    const processedAccounts = new Set<string>();
+    
+    // Pre-decodifica del quoteMint target per la ricerca
+    const targetQuoteMintBytes = bs58.decode(config.quoteToken.mint.toBase58());
+    
     return this.connection.onProgramAccountChange(
       CPMM_PROGRAM_ID,
       async (updatedAccountInfo) => {
-        // Log trovato, potenziale pool CP-Swap
-        logger.debug(`Received potential CP-Swap pool update for account: ${updatedAccountInfo.accountId.toBase58()}`);
-        this.emit('pool', updatedAccountInfo); // Emetto sempre 'pool' per uniformità
+        const accountId = updatedAccountInfo.accountId.toBase58();
+        
+        try {
+          // Evitiamo di elaborare più volte lo stesso account
+          if (processedAccounts.has(accountId)) {
+            return;
+          }
+          
+          const accountData = updatedAccountInfo.accountInfo.data;
+          const dataSize = accountData.length;
+          
+          // 1. Strategia basata su offset conosciuti
+          for (const offset of QUOTE_MINT_OFFSETS) {
+            if (dataSize >= offset + 32) {
+              const quoteMintBytes = accountData.slice(offset, offset + 32);
+              const quoteMintBase58 = bs58.encode(quoteMintBytes);
+              
+              // Se sembra un indirizzo valido, controlliamo se corrisponde
+              if (quoteMintBase58.length >= 32) {
+                if (quoteMintBase58 === config.quoteToken.mint.toBase58()) {
+                  logger.debug(`Found CP-Swap pool with matching quoteMint at offset ${offset}! Account: ${accountId}`);
+                  this.emit('pool', updatedAccountInfo);
+                  processedAccounts.add(accountId);
+                  return;
+                }
+              }
+            }
+          }
+          
+          // 2. Strategia di scansione buffer ottimizzata
+          // Usa un intervallo più breve per i primi 200 bytes (più probabile trovare il quoteMint)
+          // e un intervallo più ampio per il resto dell'account
+          let i = 0;
+          while (i <= accountData.length - 32) {
+            // Intervallo di scansione adattivo
+            const checkInterval = i < 200 ? 1 : 4;
+            
+            // Controllo rapido del primo byte prima di fare un controllo completo
+            if (accountData[i] === targetQuoteMintBytes[0]) {
+              let match = true;
+              for (let j = 0; j < 32; j++) {
+                if (accountData[i + j] !== targetQuoteMintBytes[j]) {
+                  match = false;
+                  break;
+                }
+              }
+              
+              if (match) {
+                logger.debug(`Found CP-Swap pool with quoteMint at offset ${i}! Account: ${accountId}`);
+                this.emit('pool', updatedAccountInfo);
+                processedAccounts.add(accountId);
+                return;
+              }
+            }
+            
+            i += checkInterval;
+          }
+        } catch (error) {
+          logger.error(`Error analyzing CP-Swap account ${accountId}: ${error}`);
+        }
       },
       this.connection.commitment,
-      [
-        { dataSize: POOL_ACCOUNT_SIZE },
-        { memcmp: { offset: 0, bytes: poolDiscriminator } },
-      ],
+      [] // Nessun filtro iniziale - analyziamo tutti gli account del programma
     );
   }
 
+  /**
+   * Sottoscrizione ai cambiamenti del wallet
+   */
   private async subscribeToWalletChanges(config: { walletPublicKey: PublicKey }) {
     return this.connection.onProgramAccountChange(
       TOKEN_PROGRAM_ID,
@@ -139,6 +241,9 @@ export class Listeners extends EventEmitter {
     );
   }
 
+  /**
+   * Arresta tutti i listener
+   */
   public async stop() {
     for (let i = this.subscriptions.length; i >= 0; --i) {
       const subscription = this.subscriptions[i];
