@@ -4,17 +4,16 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { EventEmitter } from 'events';
 import { sha256 } from 'js-sha256';
-import { Program } from '@coral-xyz/anchor';
-import { CPMM_PROGRAM_ID, createCpSwapProgram, getPoolAccountSize } from '../utils/anchor-utils';
+import { logger } from '../helpers';
+
+// Definisco direttamente le costanti che servono
+const CPMM_PROGRAM_ID = new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C');
 
 export class Listeners extends EventEmitter {
   private subscriptions: number[] = [];
-  private cpSwapProgram: Program | null = null;
 
   constructor(private readonly connection: Connection) {
     super();
-    // Inizializziamo il programma Anchor per CP-Swap
-    this.cpSwapProgram = createCpSwapProgram(connection, undefined, 'confirmed');
   }
 
   public async start(config: {
@@ -22,7 +21,6 @@ export class Listeners extends EventEmitter {
     quoteToken: Token;
     autoSell: boolean;
     cacheNewMarkets: boolean;
-    subscribeNewPools?: boolean; // Nuovo flag per sottoscriversi ai nuovi pool CP-Swap
   }) {
     if (config.cacheNewMarkets) {
       const openBookSubscription = await this.subscribeToOpenBookMarkets(config);
@@ -32,15 +30,12 @@ export class Listeners extends EventEmitter {
     const raydiumSubscription = await this.subscribeToRaydiumPools(config);
     this.subscriptions.push(raydiumSubscription);
 
+    const newPoolsSubscription = await this.subscribeToNewRaydiumPools(config);
+    this.subscriptions.push(newPoolsSubscription);
+
     if (config.autoSell) {
       const walletSubscription = await this.subscribeToWalletChanges(config);
       this.subscriptions.push(walletSubscription);
-    }
-
-    // Aggiungiamo la sottoscrizione ai nuovi pool CP-Swap
-    if (config.subscribeNewPools) {
-      const newPoolsSubscription = await this.subscribeToNewRaydiumPools(config);
-      this.subscriptions.push(newPoolsSubscription);
     }
   }
 
@@ -94,6 +89,35 @@ export class Listeners extends EventEmitter {
     );
   }
 
+  private async subscribeToNewRaydiumPools(config: { quoteToken: Token }) {
+    logger.debug('Subscribing to new Raydium CP-Swap pools (base)');
+
+    // Calcolo del discriminator corretto per l'account "Pool"
+    const rawDisc = sha256.digest('account:Pool').slice(0, 8);
+    const poolDiscriminator = bs58.encode(Buffer.from(rawDisc));
+
+    // Dimensione corretta dell'account Pool: 8 (discriminator) + 363 (struct) = 371
+    const POOL_ACCOUNT_SIZE = 371;
+
+    logger.debug(`Using CP-Swap Program ID: ${CPMM_PROGRAM_ID.toBase58()}`);
+    logger.debug(`Using Pool Account Size: ${POOL_ACCOUNT_SIZE}`);
+    logger.debug(`Using Pool Discriminator (base58): ${poolDiscriminator}`);
+
+    return this.connection.onProgramAccountChange(
+      CPMM_PROGRAM_ID,
+      async (updatedAccountInfo) => {
+        // Log trovato, potenziale pool CP-Swap
+        logger.debug(`Received potential CP-Swap pool update for account: ${updatedAccountInfo.accountId.toBase58()}`);
+        this.emit('pool', updatedAccountInfo); // Emetto sempre 'pool' per uniformità
+      },
+      this.connection.commitment,
+      [
+        { dataSize: POOL_ACCOUNT_SIZE },
+        { memcmp: { offset: 0, bytes: poolDiscriminator } },
+      ],
+    );
+  }
+
   private async subscribeToWalletChanges(config: { walletPublicKey: PublicKey }) {
     return this.connection.onProgramAccountChange(
       TOKEN_PROGRAM_ID,
@@ -111,39 +135,6 @@ export class Listeners extends EventEmitter {
             bytes: config.walletPublicKey.toBase58(),
           },
         },
-      ],
-    );
-  }
-
-  private async subscribeToNewRaydiumPools(config: { quoteToken: Token }) {
-    // Calcolo del discriminator corretto
-    const rawDisc = sha256.digest('account:Pool').slice(0, 8);
-    const poolDiscriminator = bs58.encode(Buffer.from(rawDisc));
-
-    // Otteniamo la dimensione dell'account dinamicamente
-    let poolAccountSize = 344; // Valore di fallback se il programma Anchor non è disponibile
-    if (this.cpSwapProgram) {
-      poolAccountSize = getPoolAccountSize(this.cpSwapProgram);
-    }
-
-    // Offset corretti basati sull'IDL
-    const QUOTE_MINT_OFFSET = 8 + 1 + 32; // 41: discriminator(8) + nonce(1) + tokenA(32)
-    const STATUS_OFFSET = 8 + 321;        // 329: discriminator(8) + offset di status(321)
-
-    // Codifica status attivo (0) in base58
-    const ACTIVE_STATUS = bs58.encode(Uint8Array.from([0])); // "1"
-
-    return this.connection.onProgramAccountChange(
-      CPMM_PROGRAM_ID,
-      async (updatedAccountInfo) => {
-        this.emit('newPool', updatedAccountInfo);
-      },
-      this.connection.commitment,
-      [
-        { dataSize: poolAccountSize },
-        { memcmp: { offset: 0, bytes: poolDiscriminator } },
-        { memcmp: { offset: QUOTE_MINT_OFFSET, bytes: config.quoteToken.mint.toBase58() } },
-        { memcmp: { offset: STATUS_OFFSET, bytes: ACTIVE_STATUS } },
       ],
     );
   }
