@@ -286,7 +286,7 @@ const runListener = async () => {
     if (!exists && poolOpenTime > runTimestamp) {
       poolCache.save(updatedAccountInfo.accountId.toString(), poolState);
 
-      await logFind(poolState.baseMint.toString(), new Date(poolOpenTime));
+      await logFind(poolState.baseMint.toString(), new Date(poolOpenTime * 1000));
 
       if (MAX_LAG != 0 && lag > MAX_LAG) {
         logger.trace(`Lag too high: ${lag} sec`);
