@@ -2,6 +2,7 @@ import { Filter, FilterResult } from './pool-filters';
 import { Connection } from '@solana/web3.js';
 import { LiquidityPoolKeysV4 } from '@raydium-io/raydium-sdk';
 import { logger } from '../helpers';
+import { RATIO_TOKEN_POOL } from '../helpers';
 
 export class BurnFilter implements Filter {
   private cachedResult: FilterResult | undefined = undefined;
@@ -33,7 +34,7 @@ export class BurnFilter implements Filter {
       logger.trace(`Percentage of tokens in pool: ${percentageInPool.toFixed(2)}%`);
 
       // If lesse than 99% of tokens are in pool, it's suspicious
-      if (percentageInPool < 99) {
+      if (percentageInPool < RATIO_TOKEN_POOL) {
         result.ok = false;
         result.message = `Suspicious: ${percentageInPool.toFixed(2)}% of total token supply is in pool`;
       }
