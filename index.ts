@@ -67,8 +67,9 @@ import {
   TRAILING_STOP_LOSS,
   TRANSACTION_EXECUTOR,
   USE_SNIPE_LIST,
-  USE_TA,
   USE_TELEGRAM,
+  USE_TA,
+  parsePoolInfo,
 } from './helpers';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
@@ -279,129 +280,48 @@ const runListener = async () => {
     marketCache.save(updatedAccountInfo.accountId.toString(), marketState);
   });
 
-  listeners.on('pool', async (updatedAccountInfo: KeyedAccountInfo) => {
+  listeners.on('pool', async (poolType: string, updatedAccountInfo: KeyedAccountInfo) => {
     try {
-      // Determina la fonte dell'evento (programma)
-      const programId = updatedAccountInfo.accountInfo.owner.toString();
-      
       let poolState: any;
       let poolOpenTime: number;
       let baseMint: string;
-      
-      // Controlla se l'evento proviene dal programma CP-Swap
-      const isCPSwapPool = programId === CPMM_PROGRAM_ID.toString();
-      
-      if (isCPSwapPool) {
-        // CP-Swap pool (nuovo formato)
-        logger.debug(`Processing CP-Swap pool: ${updatedAccountInfo.accountId.toString()}`);
-        
-        const accountData = updatedAccountInfo.accountInfo.data;
-        
-        // Salva l'intero account per analisi successiva (solo in caso di debug)
-        if (logger.level === 'debug' || logger.level === 'trace') {
-          const accountBase64 = Buffer.from(accountData).toString('base64');
-          logger.debug(`CP-Swap account buffer completo (base64): ${accountBase64}`);
-        }
-        
-        // Estraiamo baseMint (offset 16 come da precedenti analisi)
-        const OFFSET_BASE_MINT = 16;
-        if (accountData.length < OFFSET_BASE_MINT + 32) {
-          logger.warn(`CP-Swap pool ${updatedAccountInfo.accountId.toString()} ha dati insufficienti per leggere baseMint`);
-          return;
-        }
-        
-        const baseMintData = accountData.slice(OFFSET_BASE_MINT, OFFSET_BASE_MINT + 32);
-        baseMint = bs58.encode(baseMintData);
-        
-        // Strategia 1: Leggi il campo status (di solito all'offset 8)
-        const OFFSET_STATUS = 8;
-        let poolStatus = 0;
-        
-        if (accountData.length > OFFSET_STATUS) {
-          poolStatus = accountData[OFFSET_STATUS];
-          logger.debug(`CP-Swap pool status: 0x${poolStatus.toString(16)} (${poolStatus})`);
-        }
-        
-        // Strategia 2: Cerca open_time in un range più ampio
-        // Estendiamo il range di ricerca per maggiore copertura
-        const possibleOpenTimeOffsets = [];
-        // Genera offsets da 100 a 400 con incrementi di 8 byte
-        for (let offset = 100; offset <= 400; offset += 8) {
-          possibleOpenTimeOffsets.push(offset);
-        }
-        
-        let foundValidOpenTime = false;
-        
-        // Log di debug per porzioni specifiche del buffer
-        if (accountData.length > 400) {
-          logger.debug(`CP-Swap account (100-200): ${Buffer.from(accountData.slice(100, 200)).toString('hex')}`);
-          logger.debug(`CP-Swap account (200-300): ${Buffer.from(accountData.slice(200, 300)).toString('hex')}`);
-          logger.debug(`CP-Swap account (300-400): ${Buffer.from(accountData.slice(300, 400)).toString('hex')}`);
-        }
-        
-        // Diamo priorità ad offset specifici basati su esempi
-        const priorityOffsets = [232, 304, 168, 176, 184, 200];
-        const allOffsets = [...priorityOffsets, ...possibleOpenTimeOffsets.filter(o => !priorityOffsets.includes(o))];
-        
-        for (const offset of allOffsets) {
-          if (accountData.length < offset + 8) continue;
-          
-          const openTimeBuffer = accountData.slice(offset, offset + 8);
-          
+
+      switch (poolType) {
+        case 'clmm':
           try {
-            // Convertire il buffer u64 (little endian) in un numero
-            const openTimeValue = Buffer.from(openTimeBuffer).readBigUInt64LE(0);
-            const openTimeNum = Number(openTimeValue);
-            
-            // Verificare che il valore sia un timestamp ragionevole
-            // Un pool non può esistere prima di Solana (2020) e non troppo nel futuro
-            const minTimestamp = 1577836800; // 2020-01-01
-            const maxTimestamp = Math.floor(Date.now() / 1000) + 86400 * 30; // ora + 30 giorni
-            
-            if (!isNaN(openTimeNum) && openTimeNum > minTimestamp && openTimeNum < maxTimestamp) {
-              // Abbiamo trovato un timestamp valido
-              poolOpenTime = openTimeNum;
-              foundValidOpenTime = true;
-              logger.info(`Trovato open_time valido all'offset ${offset}: ${poolOpenTime} (${new Date(poolOpenTime * 1000).toISOString()})`);
-              break;
+            poolState = parsePoolInfo(updatedAccountInfo.accountInfo.data);
+
+            poolOpenTime = parseInt(poolState.poolOpenTime.toString());  // fixme
+            baseMint = poolState.mintB.toString();
+
+            const signatures = await connection.getSignaturesForAddress(updatedAccountInfo.accountId, { limit: 1 });
+            if (signatures.length > 0) {
+              const txid = signatures[0].signature;
+              console.log('Transaction ID:', txid);
             }
-          } catch (error) {
-            // Continuiamo con il prossimo offset
-          }
-        }
-        
-        // Strategia 3: Se non troviamo un openTime valido, ma il pool ha status attivo (bit 0x04 non impostato)
-        // consideriamo il pool come attivo con timestamp corrente
-        if (!foundValidOpenTime) {
-          // Se pool status non ha bit 0x04 attivo (che disabilita lo swap secondo docs), consideriamo il pool attivo
-          if ((poolStatus & 0x04) === 0) {
-            logger.info(`CP-Swap pool ${updatedAccountInfo.accountId.toString()} ha status attivo (${poolStatus}), considero il pool attivo`);
-            // Usiamo il timestamp corrente, ma sottraiamo 1 secondo per assicurarci che sia nel passato
-            poolOpenTime = Math.floor(Date.now() / 1000) - 1;
-            foundValidOpenTime = true;
-          } else {
-            logger.warn(`CP-Swap pool ${updatedAccountInfo.accountId.toString()} non ha un open_time valido e status non è attivo (${poolStatus}), ignoro il pool`);
+
+          } catch (decodeError) {
+            logger.error(`Errore decodifica pool AMM v4: ${decodeError}`);
             return;
           }
-        }
-        
-        // Creiamo un oggetto poolState minimo con solo i campi richiesti
-        poolState = {
-          baseMint: { toString: () => baseMint },
-          poolOpenTime: { toString: () => poolOpenTime.toString() }
-        };
-      } else {
-        // Pool AMM v4 legacy
-        try {
-          poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(updatedAccountInfo.accountInfo.data);
-          poolOpenTime = parseInt(poolState.poolOpenTime.toString());
-          baseMint = poolState.baseMint.toString();
-        } catch (decodeError) {
-          logger.error(`Errore decodifica pool AMM v4: ${decodeError}`);
-          return; // Termina l'elaborazione se la decodifica fallisce
-        }
+          break;
+        case 'amm':
+          try {
+            poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(updatedAccountInfo.accountInfo.data);
+            poolOpenTime = parseInt(poolState.poolOpenTime.toString());
+            baseMint = poolState.baseMint.toString();
+          } catch (decodeError) {
+            logger.error(`Errore decodifica pool AMM v4: ${decodeError}`);
+            return; // Termina l'elaborazione se la decodifica fallisce
+          }
+          break;
+        case 'cpmm':
+          // fixme
+          break;
+        default:
+          // codice da eseguire se nessun valore corrisponde
       }
-      
+
       // Verifica se il pool è già noto
       const exists = await poolCache.get(baseMint);
       
@@ -414,7 +334,7 @@ const runListener = async () => {
         let runTimestampFormatted;
         
         try {
-          poolOpenTimeFormatted = new Date(poolOpenTime * 1000).toISOString();
+          poolOpenTimeFormatted =  new Date(poolOpenTime * 1000).toISOString();
         } catch (e) {
           poolOpenTimeFormatted = `[data invalida: ${poolOpenTime}]`;
         }
@@ -425,7 +345,7 @@ const runListener = async () => {
           runTimestampFormatted = `[data invalida: ${runTimestamp}]`;
         }
         
-        logger.info(`Nuovo pool trovato: pool open time: ${poolOpenTimeFormatted}, run timestamp: ${runTimestampFormatted} ${updatedAccountInfo.accountId.toString()}, base: ${baseMint}, tipo: ${isCPSwapPool ? 'CP-Swap' : 'AMM v4'}`);
+        logger.info(`Nuovo pool trovato: pool open time: ${poolOpenTimeFormatted}, run timestamp: ${runTimestampFormatted} ${updatedAccountInfo.accountId.toString()}, base: ${baseMint}, tipo: ${poolType}`);
         
         // Salva solo i dati minimi necessari
         poolCache.save(updatedAccountInfo.accountId.toString(), poolState);

@@ -1,14 +1,13 @@
 import { LIQUIDITY_STATE_LAYOUT_V4, MAINNET_PROGRAM_ID, MARKET_STATE_LAYOUT_V3, Token } from '@raydium-io/raydium-sdk';
 import bs58 from 'bs58';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Commitment, Connection, PublicKey } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { EventEmitter } from 'events';
-import { sha256 } from 'js-sha256';
-import { logger } from '../helpers';
-import { struct, u8, blob, ns64 } from '@solana/buffer-layout';
+import { logger, parsePoolInfo, PoolInfoLayout } from '../helpers';
 
 // Program IDs
 const CPMM_PROGRAM_ID = new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C');
+const CLMM_PROGRAM_ID = new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK');
 
 // Layout e costanti per CP-Swap
 interface PoolStateLayout {
@@ -19,25 +18,13 @@ interface PoolStateLayout {
   openTime: bigint;
 }
 
-const POOL_STATE_LAYOUT = struct<PoolStateLayout>([
-  u8('status'), // offset 8 (dopo discriminator), valore attivo = 1
-  blob(7, 'padding1'),
-  blob(32, 'baseMint'), // offset 16
-  blob(32, 'quoteMint'), // offset 48
-  // altri campi...
-  ns64('openTime'), // offset esempio: 160
-]);
-
-// Discriminator per account Pool tipo Anchor
-const POOL_DISCRIMINATOR = bs58.encode(Buffer.from(sha256.digest('account:Pool').slice(0, 8)));
-
 // Offset conosciuti per quote_mint basati su osservazioni reali
 const QUOTE_MINT_OFFSETS = [
-  48,   // offset comune per account di 637 bytes
-  128,  // offset alternativo osservato
-  168,  // offset confermato per SOL
-  256,  // offset alternativo osservato
-  512   // offset alternativo osservato
+  48, // offset comune per account di 637 bytes
+  128, // offset alternativo osservato
+  168, // offset confermato per SOL
+  256, // offset alternativo osservato
+  512, // offset alternativo osservato
 ];
 
 export class Listeners extends EventEmitter {
@@ -58,18 +45,23 @@ export class Listeners extends EventEmitter {
     autoSell: boolean;
     cacheNewMarkets: boolean;
   }) {
-    if (config.cacheNewMarkets) {
-      const openBookSubscription = await this.subscribeToOpenBookMarkets(config);
-      this.subscriptions.push(openBookSubscription);
-    }
+    // if (config.cacheNewMarkets) {
+    //   const openBookSubscription = await this.subscribeToOpenBookMarkets(config);
+    //   this.subscriptions.push(openBookSubscription);
+    // }
 
     // Legacy AMM v4 pools
-    const raydiumSubscription = await this.subscribeToRaydiumPools(config);
-    this.subscriptions.push(raydiumSubscription);
+    // const raydiumSubscription = await this.subscribeToRaydiumPools(config);
+    // this.subscriptions.push(raydiumSubscription);
 
     // CP-Swap pools (new Standard AMM)
-    const cpSwapSubscription = await this.subscribeToCPSwapPools(config);
-    this.subscriptions.push(cpSwapSubscription);
+    // const cpSwapSubscription = await this.subscribeToCPSwapPools(config);
+    // this.subscriptions.push(cpSwapSubscription);
+
+    // CP-Swap pools (new Standard AMM)
+    const clmmSubscription = await this.subscribeToClmmPools(config);
+    console.log(clmmSubscription);
+    this.subscriptions.push(clmmSubscription);
 
     if (config.autoSell) {
       const walletSubscription = await this.subscribeToWalletChanges(config);
@@ -132,42 +124,44 @@ export class Listeners extends EventEmitter {
       ],
     );
   }
-  
+
   /**
    * Sottoscrizione ai pool Raydium CP-Swap (Standard AMM)
    * Utilizza una strategia adattiva per trovare pool con il quoteMint desiderato,
    * indipendentemente dal layout esatto dell'account.
    */
   private async subscribeToCPSwapPools(config: { quoteToken: Token }) {
-    logger.info(`Subscribing to Raydium CP-Swap pools for ${config.quoteToken.symbol || config.quoteToken.mint.toBase58()}`);
+    logger.info(
+      `Subscribing to Raydium CP-Swap pools for ${config.quoteToken.symbol || config.quoteToken.mint.toBase58()}`,
+    );
     logger.info(`Using CP-Swap Program ID: ${CPMM_PROGRAM_ID.toBase58()}`);
-    
+
     // Manteniamo un registro degli account già elaborati per evitare duplicati
     const processedAccounts = new Set<string>();
-    
+
     // Pre-decodifica del quoteMint target per la ricerca
     const targetQuoteMintBytes = bs58.decode(config.quoteToken.mint.toBase58());
-    
+
     return this.connection.onProgramAccountChange(
       CPMM_PROGRAM_ID,
       async (updatedAccountInfo) => {
         const accountId = updatedAccountInfo.accountId.toBase58();
-        
+
         try {
           // Evitiamo di elaborare più volte lo stesso account
           if (processedAccounts.has(accountId)) {
             return;
           }
-          
+
           const accountData = updatedAccountInfo.accountInfo.data;
           const dataSize = accountData.length;
-          
+
           // 1. Strategia basata su offset conosciuti
           for (const offset of QUOTE_MINT_OFFSETS) {
             if (dataSize >= offset + 32) {
               const quoteMintBytes = accountData.slice(offset, offset + 32);
               const quoteMintBase58 = bs58.encode(quoteMintBytes);
-              
+
               // Se sembra un indirizzo valido, controlliamo se corrisponde
               if (quoteMintBase58.length >= 32) {
                 if (quoteMintBase58 === config.quoteToken.mint.toBase58()) {
@@ -179,7 +173,7 @@ export class Listeners extends EventEmitter {
               }
             }
           }
-          
+
           // 2. Strategia di scansione buffer ottimizzata
           // Usa un intervallo più breve per i primi 200 bytes (più probabile trovare il quoteMint)
           // e un intervallo più ampio per il resto dell'account
@@ -187,7 +181,7 @@ export class Listeners extends EventEmitter {
           while (i <= accountData.length - 32) {
             // Intervallo di scansione adattivo
             const checkInterval = i < 200 ? 1 : 4;
-            
+
             // Controllo rapido del primo byte prima di fare un controllo completo
             if (accountData[i] === targetQuoteMintBytes[0]) {
               let match = true;
@@ -197,7 +191,7 @@ export class Listeners extends EventEmitter {
                   break;
                 }
               }
-              
+
               if (match) {
                 logger.debug(`Found CP-Swap pool with quoteMint at offset ${i}! Account: ${accountId}`);
                 this.emit('pool', updatedAccountInfo);
@@ -205,7 +199,7 @@ export class Listeners extends EventEmitter {
                 return;
               }
             }
-            
+
             i += checkInterval;
           }
         } catch (error) {
@@ -213,7 +207,46 @@ export class Listeners extends EventEmitter {
         }
       },
       this.connection.commitment,
-      [] // Nessun filtro iniziale - analyziamo tutti gli account del programma
+      [], // Nessun filtro iniziale - analyziamo tutti gli account del programma
+    );
+  }
+
+  private async subscribeToClmmPools(config: { quoteToken: Token }) {
+    const commitment: Commitment = this.connection.commitment || 'confirmed';
+
+    return this.connection.onProgramAccountChange(
+      CLMM_PROGRAM_ID,
+      async (updatedAccountInfo) => {
+        this.emit('pool', { poolType: 'clmm', accountInfo: updatedAccountInfo });
+        logger.info(updatedAccountInfo.accountId.toString());
+        logger.info(updatedAccountInfo.accountInfo.data .signature.toString());
+        // logger.info(`Buffer size: ${updated.accountInfo.data.length}`);
+        // logger.info(parsePoolInfo(updated.accountInfo.data));
+      },
+      commitment,
+      [
+        {
+          dataSize: 1544,
+        },
+        {
+          memcmp: {
+            offset: PoolInfoLayout.offsetOf('mintA'),
+            bytes: config.quoteToken.mint.toBase58(),
+          },
+        },
+        {
+          memcmp: {
+            offset: PoolInfoLayout.offsetOf('status'),
+            bytes: bs58.encode(Uint8Array.of(0)),
+          },
+        },
+        {
+          memcmp: {
+            offset: PoolInfoLayout.offsetOf('startTime'),
+            bytes: bs58.encode(Buffer.alloc(8))
+          }
+        },
+      ],
     );
   }
 
