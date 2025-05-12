@@ -5,9 +5,9 @@ import { logger } from './logger';
 
 dotenv.config();
 
-const retrieveEnvVariable = (variableName: string, logger: Logger) => {
+const retrieveEnvVariable = (variableName: string, logger: Logger, isRequired: boolean = true) => {
   const variable = process.env[variableName] || '';
-  if (!variable) {
+  if (isRequired && !variable) {
     logger.error(`${variableName} is not set`);
     process.exit(1);
   }
@@ -104,5 +104,5 @@ export const MACD_SIGNAL_PERIOD = Number (retrieveEnvVariable('MACD_SIGNAL_PERIO
 
 export const RSI_PERIOD = Number (retrieveEnvVariable('RSI_PERIOD', logger));
 
-// MongoDB
-export const MONGODB_URI = retrieveEnvVariable('MONGODB_URI', logger);
+// DB
+export const MONGODB_URI = retrieveEnvVariable('MONGODB_URI', logger, false);
