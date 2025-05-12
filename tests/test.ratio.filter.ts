@@ -1,14 +1,14 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { LIQUIDITY_STATE_LAYOUT_V4, MAINNET_PROGRAM_ID } from '@raydium-io/raydium-sdk';
-import { BurnFilter } from '../filters';
 import { createPoolKeys } from '../helpers';
+import { TokenSupplyRatioFilter } from '../filters/supply-ratio.filter';
 
-async function testBurnFilter(tokenAddress: string) {
+async function testTokenSupplyRatioFilter(tokenAddress: string) {
     // Create a connection to Solana mainnet
     const connection = new Connection('https://withered-still-fire.solana-mainnet.quiknode.pro/30250b1bd89bcc21eb001b4301525bfae31f96a1/', 'confirmed');
     
     // Create an instance of BurnFilter
-    const burnFilter = new BurnFilter(connection);
+    const tokenSupplyRatioFilter = new TokenSupplyRatioFilter(connection);
 
     // Get all Raydium pools
     const accounts = await connection.getProgramAccounts(
@@ -50,8 +50,8 @@ async function testBurnFilter(tokenAddress: string) {
         );
 
         // Test the burn filter
-        const result = await burnFilter.execute(poolKeys);
-        console.log('Burn filter result:', result);
+        const result = await tokenSupplyRatioFilter.execute(poolKeys);
+        console.log('Token supply ratio filter result:', result);
     }
 }
 
@@ -59,8 +59,8 @@ async function testBurnFilter(tokenAddress: string) {
 async function main() {
     // Example token address - replace with your token address
     const tokenAddress = '4FN9GkMNb66MGiqZA4D2KcYUkKFx7m2ueE6mp6ptNpYU';
-    console.log(`Testing burn filter for token: ${tokenAddress}`);
-    await testBurnFilter(tokenAddress);
+    console.log(`Testing token supply ratio filter for token: ${tokenAddress}`);
+    await testTokenSupplyRatioFilter(tokenAddress);
 }
 
 // Run the test

@@ -2,17 +2,19 @@ import { Connection } from '@solana/web3.js';
 import { LiquidityPoolKeysV4, Token, TokenAmount } from '@raydium-io/raydium-sdk';
 import { getMetadataAccountDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
 import { BurnFilter } from './burn.filter';
+import { TokenSupplyRatioFilter } from './supply-ratio.filter';
 import { MutableFilter } from './mutable.filter';
 import { RenouncedFreezeFilter } from './renounced.filter';
 import { PoolSizeFilter } from './pool-size.filter';
 import { 
   CHECK_IF_BURNED,
-  CHECK_IF_FREEZABLE, 
+  CHECK_IF_FREEZABLE,
   CHECK_IF_MINT_IS_RENOUNCED, 
   CHECK_IF_MUTABLE, 
   CHECK_IF_SOCIALS, 
   CHECK_TOKEN_DISTRIBUTION,
   CHECK_HOLDERS,
+  CHECK_TOKEN_SUPPLY_RATIO,
   logger } from '../helpers';
 import { HoldersCountFilter, TopHolderDistributionFilter } from './holders';
 import { BlacklistFilter } from './blacklist.filter';
@@ -53,6 +55,10 @@ export class PoolFilters {
 
     if (CHECK_IF_BURNED) {
       this.filters.push(new BurnFilter(connection));
+    }
+
+    if (CHECK_TOKEN_SUPPLY_RATIO) {
+      this.filters.push(new TokenSupplyRatioFilter(connection));
     }
 
     if (CHECK_IF_MINT_IS_RENOUNCED || CHECK_IF_FREEZABLE) {
