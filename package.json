@@ -6,7 +6,7 @@
   "scripts": {
     "start": "ts-node index.ts",
     "tsc": "tsc --noEmit",
-    "test:burn": "ts-node tests/test.burn.filter.ts"
+    "test:ratio": "ts-node tests/test.ratio.filter.ts"
   },
   "dependencies": {
     "@metaplex-foundation/mpl-token-metadata": "^3.2.1",
