@@ -129,7 +129,10 @@ Note: When using snipe list filters below will be disabled.
 - `BLACKLIST_REFRESH_INTERVAL` - Interval in milliseconds to refresh the blacklist.
   - Blacklist checks update authority metadata of token, for "creator" wallets. 
 - `WHITELIST_REFRESH_INTERVAL` - Interval in milliseconds to refresh the whitelist 
-  - Whitelist checks update authority metadata of token, for "creator" wallets. 
+  - Whitelist checks update authority metadata of token, for "creator" wallets.
+- `CHECK_TOKEN_SUPPLY_RATIO` - Set to `true` to check the ratio between token supply and pool liquidity.
+- `RATIO_TOKEN_POOL` - Minimum allowed ratio between token supply and pool liquidity.
+  - This helps identify potential rug pulls where token supply is much larger than token's amount in liquidity pool.
 
 #### Holders
 

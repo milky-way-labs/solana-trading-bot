@@ -69,6 +69,8 @@ import {
   USE_SNIPE_LIST,
   USE_TA,
   USE_TELEGRAM,
+  CHECK_TOKEN_SUPPLY_RATIO,
+  RATIO_TOKEN_POOL
 } from './helpers';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
@@ -158,6 +160,9 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
     logger.info(`Min pool size: ${botConfig.minPoolSize.toFixed()}`);
     logger.info(`Max pool size: ${botConfig.maxPoolSize.toFixed()}`);
     logger.info(`Min initial liquidity value: ${botConfig.minInitialLiquidityValue.toFixed()}`);
+    logger.info(`Check token supply ratio: ${CHECK_TOKEN_SUPPLY_RATIO}`);
+    logger.info(`Token supply ratio: ${RATIO_TOKEN_POOL}%`);
+
   }
 
   logger.info(`Check Holders: ${botConfig.checkHolders}`);
