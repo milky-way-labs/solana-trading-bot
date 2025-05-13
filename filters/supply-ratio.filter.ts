@@ -29,7 +29,7 @@ export class TokenSupplyRatioFilter implements Filter {
       const percentageInPool = (baseTokenAmount.value.uiAmount! / tokenAmount.value.uiAmount!) * 100;
       logger.trace(`Percentage of tokens in pool: ${percentageInPool.toFixed(2)}%`);
 
-      const result = {ok: true, message: ''}
+      const result = { ok: true }
 
       // If lesse than 99% of tokens are in pool, it's suspicious
       if (percentageInPool < RATIO_TOKEN_POOL) {
