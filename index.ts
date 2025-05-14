@@ -280,51 +280,72 @@ const runListener = async () => {
     marketCache.save(updatedAccountInfo.accountId.toString(), marketState);
   });
 
-  listeners.on('pool', async (poolType: string, updatedAccountInfo: KeyedAccountInfo) => {
+  async function getPoolCreationTime(
+    connection: Connection,
+    poolAddress: PublicKey
+  ): Promise<number | null> {
+    const signatures = await connection.getSignaturesForAddress(poolAddress, { limit: 1 });
+    console.log('signatures', signatures)
+    if (!signatures.length || !signatures[0].blockTime) return null;
+    const poolCreationTime = signatures[0].blockTime * 1000;
+    return poolCreationTime;
+  }
+
+  function hexLEToBigInt(hex: string): bigint {
+    const buf = Buffer.from(hex, 'hex');
+    const reversed = Buffer.from(buf).reverse(); // perché è LE
+    return BigInt('0x' + reversed.toString('hex'));
+  }
+
+  listeners.on('pool', async (poolType: { poolType: string, accountInfo: KeyedAccountInfo }) => {
     try {
       let poolState: any;
       let poolOpenTime: number;
       let baseMint: string;
-
-      switch (poolType) {
+      switch (poolType.poolType) {
         case 'clmm':
           try {
-            poolState = parsePoolInfo(updatedAccountInfo.accountInfo.data);
-
-            poolOpenTime = parseInt(poolState.poolOpenTime.toString());  // fixme
+            poolState = parsePoolInfo(poolType.accountInfo.accountInfo.data);
             baseMint = poolState.mintB.toString();
-
-            const signatures = await connection.getSignaturesForAddress(updatedAccountInfo.accountId, { limit: 1 });
+            poolOpenTime = poolState.startTime
+            logger.info(`poolOpenTime ${poolOpenTime} ${poolType.accountInfo.accountId.toString()}`)
+            
+            //const poolCreationTime = await getPoolCreationTime(connection, poolType.accountInfo.accountId)
+            /* const liquidity_v4pool = LIQUIDITY_STATE_LAYOUT_V4.decode(poolType.accountInfo.accountInfo.data);
+            logger.info(`opentim ${hexLEToBigInt(liquidity_v4pool.poolOpenTime.toString())}`)
+            logger.info(liquidity_v4pool)
+            logger.info(`poolCreationTime ${poolCreationTime}`)
+            logger.info(`poolOpenTime ${poolState.startTime.toString()}`) */
+            /* const signatures = await connection.getSignaturesForAddress(poolType.accountInfo.accountId, { limit: 1 });
             if (signatures.length > 0) {
               const txid = signatures[0].signature;
               console.log('Transaction ID:', txid);
-            }
+            } */
 
           } catch (decodeError) {
             logger.error(`Errore decodifica pool AMM v4: ${decodeError}`);
             return;
           }
-          break;
         case 'amm':
           try {
-            poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(updatedAccountInfo.accountInfo.data);
+            poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(poolType.accountInfo.accountInfo.data);
             poolOpenTime = parseInt(poolState.poolOpenTime.toString());
             baseMint = poolState.baseMint.toString();
           } catch (decodeError) {
             logger.error(`Errore decodifica pool AMM v4: ${decodeError}`);
             return; // Termina l'elaborazione se la decodifica fallisce
           }
-          break;
         case 'cpmm':
           // fixme
           break;
         default:
           // codice da eseguire se nessun valore corrisponde
+          break;
       }
+
 
       // Verifica se il pool è già noto
       const exists = await poolCache.get(baseMint);
-      
       let currentTimestamp = Math.floor(new Date().getTime() / 1000);
       let lag = currentTimestamp - poolOpenTime;
 
@@ -332,6 +353,7 @@ const runListener = async () => {
         // Formattazione sicura delle date per il log
         let poolOpenTimeFormatted;
         let runTimestampFormatted;
+        logger.info('formattazione date')
         
         try {
           poolOpenTimeFormatted =  new Date(poolOpenTime * 1000).toISOString();
@@ -344,11 +366,10 @@ const runListener = async () => {
         } catch (e) {
           runTimestampFormatted = `[data invalida: ${runTimestamp}]`;
         }
-        
-        logger.info(`Nuovo pool trovato: pool open time: ${poolOpenTimeFormatted}, run timestamp: ${runTimestampFormatted} ${updatedAccountInfo.accountId.toString()}, base: ${baseMint}, tipo: ${poolType}`);
-        
+        logger.info(`poolOpenTime prima di poolCache.save ${poolOpenTime}`)
+        logger.info(`Nuovo pool trovato: pool open time: ${poolOpenTimeFormatted}, run timestamp: ${runTimestampFormatted} ${poolType.accountInfo.accountId.toString()}, base: ${baseMint}, tipo: ${poolType.poolType}`);
         // Salva solo i dati minimi necessari
-        poolCache.save(updatedAccountInfo.accountId.toString(), poolState);
+        poolCache.save(poolType.accountInfo.accountId.toString(), poolState);
         
         // Log del nuovo token trovato in modo sicuro
         try {

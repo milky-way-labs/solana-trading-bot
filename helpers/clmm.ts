@@ -233,6 +233,8 @@ export function parsePoolInfo(buf: Buffer): PoolInfo {
     fundFeesTokenA: readU64(raw.fundFeesTokenA),
     fundFeesTokenB: readU64(raw.fundFeesTokenB),
 
-    startTime: readU64(raw.startTime),
+    startTime: typeof raw.startTime === 'bigint'
+    ? raw.startTime
+    : readU64(raw.startTime),
   };
 }

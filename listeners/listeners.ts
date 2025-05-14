@@ -1,9 +1,10 @@
-import { LIQUIDITY_STATE_LAYOUT_V4, MAINNET_PROGRAM_ID, MARKET_STATE_LAYOUT_V3, Token } from '@raydium-io/raydium-sdk';
+import { LIQUIDITY_STATE_LAYOUT_V4, LIQUIDITY_STATE_LAYOUT_V5, MAINNET_PROGRAM_ID, MARKET_STATE_LAYOUT_V3, Token } from '@raydium-io/raydium-sdk';
 import bs58 from 'bs58';
-import { Commitment, Connection, PublicKey } from '@solana/web3.js';
+import { Commitment, Connection, PublicKey, SignatureStatus } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { EventEmitter } from 'events';
 import { logger, parsePoolInfo, PoolInfoLayout } from '../helpers';
+import { coder, IDL } from '@coral-xyz/anchor/dist/cjs/native/system';
 
 // Program IDs
 const CPMM_PROGRAM_ID = new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C');
@@ -125,6 +126,44 @@ export class Listeners extends EventEmitter {
     );
   }
 
+    /* private async subscribeToRaydiumClmmPools(config: { quoteToken: Token }) {
+      const commitment = this.connection.commitment || 'confirmed';
+    
+      return this.connection.onProgramAccountChange(
+        MAINNET_PROGRAM_ID.CLMM,
+        async (updatedAccountInfo) => {
+          try {
+            const raw = updatedAccountInfo.accountInfo.data;
+            const parsed = ClmmPoolInfoLayout.decode(raw);
+    
+            this.emit('pool', {
+              poolType: 'clmm',
+              accountInfo: updatedAccountInfo,
+              parsed,
+            });
+          } catch (err) {
+            console.error('[CLMM PARSE ERROR]', err);
+          }
+        },
+        commitment,
+        [
+          { dataSize: ClmmPoolInfoLayout.span },
+          {
+            memcmp: {
+              offset: ClmmPoolInfoLayout.offsetOf('tokenMint0'),
+              bytes: config.quoteToken.mint.toBase58(),
+            },
+          },
+          {
+            memcmp: {
+              offset: ClmmPoolInfoLayout.offsetOf('status'),
+              bytes: bs58.encode(Uint8Array.of(1)), // 1 = attiva
+            },
+          },
+        ],
+      );
+    } */
+
   /**
    * Sottoscrizione ai pool Raydium CP-Swap (Standard AMM)
    * Utilizza una strategia adattiva per trovare pool con il quoteMint desiderato,
@@ -211,40 +250,87 @@ export class Listeners extends EventEmitter {
     );
   }
 
+
   private async subscribeToClmmPools(config: { quoteToken: Token }) {
     const commitment: Commitment = this.connection.commitment || 'confirmed';
 
+    const LIQ_TAG = 'PoolCreatedEvent';
+    const LIQ_TAG_2 = 'CreatePool';
+    /* const tx = await this.connection.getParsedTransaction(
+      '28Eqjpad1mL6BMLh432CedzN3atkc9LwXxHvA5VweYFfJfYPstj9oFysWed9n1LA4Z7zSPi5W2ogLcPsFumMH8NF',
+      { maxSupportedTransactionVersion: 0 }
+    );
+    console.log(tx?.meta?.logMessages); */
+
+    return this.connection.onLogs(
+      MAINNET_PROGRAM_ID.CLMM,
+      async ({ logs, signature }) => {
+        
+        if (logs.some(l => l.includes(LIQ_TAG) || l.includes(LIQ_TAG_2))) {
+          logger.info(`add-liquidity ${signature}`)
+          const status = await this.connection.getSignatureStatus(signature)
+          
+          if (!status.value.err) {
+            const tx = await this.connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 })
+            if (tx) {
+              // 1. Get status
+              
+              // 2. Get mint token (from instructions)
+              let baseToken: string | undefined;
+              let quoteToken: string | undefined;
+              let mintTokenB: string | undefined;
+              let mintTokenAddress: string | undefined;
+              for (const ix of tx.transaction.message.instructions) {
+                // Only look at parsed instructions
+                if ('parsed' in ix && ix.parsed?.info?.mint) {
+                  console.log(ix.parsed.info)
+                  console.log(ix.parsed)
+                  quoteToken = ix.parsed.info.mint;
+                  baseToken = ix.parsed.info.account;
+                  mintTokenB = ix.parsed.info.mintB
+                  mintTokenAddress = ix.parsed.info.mintAddress
+                  break;
+                }
+              }
+              
+              console.log('Status:', status);
+              console.log('Mint token Address:', mintTokenAddress);
+              // You can emit or use these as needed
+              this.emit('add-liquidity', { signature, status, baseToken });
+            }
+            
+          }
+          else console.log('failed');
+          
+        }      
+      },
+      'confirmed'
+    );
     return this.connection.onProgramAccountChange(
-      CLMM_PROGRAM_ID,
+      MAINNET_PROGRAM_ID.CLMM,
       async (updatedAccountInfo) => {
+        const buf = updatedAccountInfo.accountInfo.data;
+        //const parsed = PoolInfoLayout.decode(buf);
+        const parsed = parsePoolInfo(buf);
+        // const parsed = parsePoolInfo(buf);
+        /* logger.info(`Pool ${updatedAccountInfo.accountId.toBase58()}`);
+        const isLive = parsed.status !== 0;
+        const isStarted = parsed.startTime > 0;
+        logger.info('poll time', parsed.startTime.toString()) */
+        /* const hasLiquidity = parsed.liquidity > 0n;
+        const hasPrice = parsed.sqrtPriceX64 > 0n; */
         this.emit('pool', { poolType: 'clmm', accountInfo: updatedAccountInfo });
-        logger.info(updatedAccountInfo.accountId.toString());
-        logger.info(updatedAccountInfo.accountInfo.data .signature.toString());
         // logger.info(`Buffer size: ${updated.accountInfo.data.length}`);
         // logger.info(parsePoolInfo(updated.accountInfo.data));
       },
       commitment,
       [
-        {
-          dataSize: 1544,
-        },
+        { dataSize: 1544 },
         {
           memcmp: {
             offset: PoolInfoLayout.offsetOf('mintA'),
             bytes: config.quoteToken.mint.toBase58(),
           },
-        },
-        {
-          memcmp: {
-            offset: PoolInfoLayout.offsetOf('status'),
-            bytes: bs58.encode(Uint8Array.of(0)),
-          },
-        },
-        {
-          memcmp: {
-            offset: PoolInfoLayout.offsetOf('startTime'),
-            bytes: bs58.encode(Buffer.alloc(8))
-          }
         },
       ],
     );
