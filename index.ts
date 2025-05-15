@@ -70,6 +70,7 @@ import {
   USE_TELEGRAM,
   USE_TA,
   parsePoolInfo,
+  PoolInfo,
 } from './helpers';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
@@ -297,44 +298,38 @@ const runListener = async () => {
     return BigInt('0x' + reversed.toString('hex'));
   }
 
-  listeners.on('pool', async (poolType: { poolType: string, accountInfo: KeyedAccountInfo }) => {
+  listeners.on('pool', async (pool: { poolType: string, accountInfo: KeyedAccountInfo | PoolInfo, poolAddress: string | null }) => {
     try {
       let poolState: any;
       let poolOpenTime: number;
       let baseMint: string;
-      switch (poolType.poolType) {
+      let poolInfo: any;
+      logger.info('pool received');
+      logger.info(`pool ${pool.poolType}`);
+      switch (pool.poolType) {
         case 'clmm':
           try {
-            poolState = parsePoolInfo(poolType.accountInfo.accountInfo.data);
-            baseMint = poolState.mintB.toString();
-            poolOpenTime = poolState.startTime
-            logger.info(`poolOpenTime ${poolOpenTime} ${poolType.accountInfo.accountId.toString()}`)
-            
-            //const poolCreationTime = await getPoolCreationTime(connection, poolType.accountInfo.accountId)
-            /* const liquidity_v4pool = LIQUIDITY_STATE_LAYOUT_V4.decode(poolType.accountInfo.accountInfo.data);
-            logger.info(`opentim ${hexLEToBigInt(liquidity_v4pool.poolOpenTime.toString())}`)
-            logger.info(liquidity_v4pool)
-            logger.info(`poolCreationTime ${poolCreationTime}`)
-            logger.info(`poolOpenTime ${poolState.startTime.toString()}`) */
-            /* const signatures = await connection.getSignaturesForAddress(poolType.accountInfo.accountId, { limit: 1 });
-            if (signatures.length > 0) {
-              const txid = signatures[0].signature;
-              console.log('Transaction ID:', txid);
-            } */
-
+            poolInfo = pool.accountInfo
+            logger.info(`account info ${poolInfo}`);
+            baseMint = poolInfo.mintB.toString();
+            poolOpenTime = poolInfo.startTime
+            logger.info(`pool received ${baseMint} ${pool.poolAddress}`)
+            logger.info(`poolOpenTime ${poolOpenTime}`);
+            break;
           } catch (decodeError) {
-            logger.error(`Errore decodifica pool AMM v4: ${decodeError}`);
+            logger.error(`Errore decodifica pool CLMM: ${decodeError}`);
             return;
           }
         case 'amm':
-          try {
-            poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(poolType.accountInfo.accountInfo.data);
-            poolOpenTime = parseInt(poolState.poolOpenTime.toString());
-            baseMint = poolState.baseMint.toString();
-          } catch (decodeError) {
-            logger.error(`Errore decodifica pool AMM v4: ${decodeError}`);
-            return; // Termina l'elaborazione se la decodifica fallisce
+          logger.info(`amm pool received`);
+          if ('accountInfo' in pool.accountInfo) {
+            poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(pool.accountInfo.accountInfo.data);
+          } else {
+            throw new Error('Expected KeyedAccountInfo for AMM pool');
           }
+          poolOpenTime = parseInt(poolState.poolOpenTime.toString());
+          baseMint = poolState.baseMint.toString();
+          break;
         case 'cpmm':
           // fixme
           break;
@@ -347,8 +342,10 @@ const runListener = async () => {
       // Verifica se il pool è già noto
       const exists = await poolCache.get(baseMint);
       let currentTimestamp = Math.floor(new Date().getTime() / 1000);
+      logger.info(`type of poolOpenTime ${typeof poolOpenTime}`);
+      logger.info(`type of runTimestamp ${typeof runTimestamp}`);
       let lag = currentTimestamp - poolOpenTime;
-
+      logger.info(`lag ${lag}`);
       if (!exists && poolOpenTime > runTimestamp) {
         // Formattazione sicura delle date per il log
         let poolOpenTimeFormatted;
@@ -366,10 +363,19 @@ const runListener = async () => {
         } catch (e) {
           runTimestampFormatted = `[data invalida: ${runTimestamp}]`;
         }
+        let accountId: string | undefined;
+        if (pool.poolAddress) {
+          accountId = pool.poolAddress;
+        } else if ('accountId' in pool.accountInfo) {
+          accountId = pool.accountInfo.accountId.toBase58();
+        } else {
+          accountId = undefined; // or handle PoolInfo case if needed
+        }
+
         logger.info(`poolOpenTime prima di poolCache.save ${poolOpenTime}`)
-        logger.info(`Nuovo pool trovato: pool open time: ${poolOpenTimeFormatted}, run timestamp: ${runTimestampFormatted} ${poolType.accountInfo.accountId.toString()}, base: ${baseMint}, tipo: ${poolType.poolType}`);
+        logger.info(`Nuovo pool trovato: pool open time: ${poolOpenTimeFormatted}, run timestamp: ${runTimestampFormatted} ${accountId}, base: ${baseMint}, tipo: ${pool.poolType}`);
         // Salva solo i dati minimi necessari
-        poolCache.save(poolType.accountInfo.accountId.toString(), poolState);
+        poolCache.save(accountId, poolState);
         
         // Log del nuovo token trovato in modo sicuro
         try {

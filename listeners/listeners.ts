@@ -1,10 +1,11 @@
 import { LIQUIDITY_STATE_LAYOUT_V4, LIQUIDITY_STATE_LAYOUT_V5, MAINNET_PROGRAM_ID, MARKET_STATE_LAYOUT_V3, Token } from '@raydium-io/raydium-sdk';
 import bs58 from 'bs58';
-import { Commitment, Connection, PublicKey, SignatureStatus } from '@solana/web3.js';
+import { Commitment, Connection, PartiallyDecodedInstruction, PublicKey, SignatureStatus } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { EventEmitter } from 'events';
-import { logger, parsePoolInfo, PoolInfoLayout } from '../helpers';
+import { logger, parsePoolInfo, PoolInfoLayout, QUOTE_MINT } from '../helpers';
 import { coder, IDL } from '@coral-xyz/anchor/dist/cjs/native/system';
+import { log } from 'console';
 
 // Program IDs
 const CPMM_PROGRAM_ID = new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C');
@@ -272,31 +273,38 @@ export class Listeners extends EventEmitter {
           
           if (!status.value.err) {
             const tx = await this.connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 })
+
             if (tx) {
-              // 1. Get status
-              
-              // 2. Get mint token (from instructions)
-              let baseToken: string | undefined;
-              let quoteToken: string | undefined;
-              let mintTokenB: string | undefined;
-              let mintTokenAddress: string | undefined;
-              for (const ix of tx.transaction.message.instructions) {
-                // Only look at parsed instructions
-                if ('parsed' in ix && ix.parsed?.info?.mint) {
-                  console.log(ix.parsed.info)
-                  console.log(ix.parsed)
-                  quoteToken = ix.parsed.info.mint;
-                  baseToken = ix.parsed.info.account;
-                  mintTokenB = ix.parsed.info.mintB
-                  mintTokenAddress = ix.parsed.info.mintAddress
-                  break;
+                const clmmIx = tx.transaction.message.instructions.find(
+                  ix => ix.programId.equals(MAINNET_PROGRAM_ID.CLMM)
+                ) as PartiallyDecodedInstruction | undefined;
+    
+                /*
+                  0  = pool_creator      (payer)
+                  1  = amm_config
+                  2  = pool_state
+                  3  = token_mint_0
+                  4  = token_mint_1
+                  5  = token_vault_0
+                  6  = token_vault_1
+                */
+                
+                if (clmmIx) {
+                  // indice 2 nella lista di account dell'istruzione
+                  const poolPubkey = clmmIx.accounts[2]; // Use account directly instead of using as index
+                  const poolAddressStr = poolPubkey.toBase58();
+                  const poolInfo = await this.connection.getAccountInfo(poolPubkey)
+                  const data = parsePoolInfo(poolInfo.data)
+                  logger.info(`poolState data ${data.mintA} ${data.mintB}`);
+                  logger.info(`NUOVA CLMM POOL → ${poolAddressStr}`);
+
+                  if (data.mintA.toBase58() == 'So11111111111111111111111111111111111111112')
+                    this.emit('pool', {poolType: 'clmm', accountInfo: data, poolAddress: poolAddressStr});
+                  else
+                  logger.info(`Mint not equal to QUOTE_MINT ${data.mintA.toBase58()}`)
                 }
-              }
-              
-              console.log('Status:', status);
-              console.log('Mint token Address:', mintTokenAddress);
               // You can emit or use these as needed
-              this.emit('add-liquidity', { signature, status, baseToken });
+              
             }
             
           }
