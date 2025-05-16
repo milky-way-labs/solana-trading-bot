@@ -1,7 +1,58 @@
 import { PublicKey } from '@solana/web3.js';
-import { Liquidity, LiquidityPoolKeys, LiquidityStateV4, MAINNET_PROGRAM_ID, Market } from '@raydium-io/raydium-sdk';
+import { Clmm, Liquidity, LiquidityPoolKeys, LiquidityStateV4, MAINNET_PROGRAM_ID, Market } from '@raydium-io/raydium-sdk';
 import { MinimalMarketLayoutV3 } from './market';
 import * as puppeteer from 'puppeteer';
+import type { ClmmPoolInfo } from '@raydium-io/raydium-sdk-v2';
+import BN from 'bn.js';
+import { Decimal } from 'decimal.js';
+
+export function createClmmPoolInfo(id: PublicKey, s: any): ClmmPoolInfo {
+  return {
+    id,
+    mintA: {
+      programId: s.programId,
+      mint:      s.mintA,
+      vault:     s.vaultA,
+      decimals:  s.mintDecimalsA,
+    },
+    mintB: {
+      programId: s.programId,
+      mint:      s.mintB,
+      vault:     s.vaultB,
+      decimals:  s.mintDecimalsB,
+    },
+    ammConfig:       s.ammConfig || { tradeFeeRate: s.feeRate, protocolFeeRate: 0 },
+    observationId:   s.observationId || PublicKey.default,
+    creator:         PublicKey.default,
+    programId:       s.programId,
+    version:         6,
+    tickSpacing:     s.tickSpacing,
+    liquidity:       s.liquidity || new BN(0),
+    sqrtPriceX64:    s.sqrtPriceX64 || new BN(0),
+    currentPrice:    s.currentPrice || new Decimal(0),
+    tickCurrent:     s.tickCurrent || 0,
+    observationIndex:0,
+    observationUpdateDuration: 0,
+    feeGrowthGlobalX64A: new BN(0),
+    feeGrowthGlobalX64B: new BN(0),
+    protocolFeesTokenA:  new BN(0),
+    protocolFeesTokenB:  new BN(0),
+    swapInAmountTokenA:  new BN(0),
+    swapOutAmountTokenB: new BN(0),
+    swapInAmountTokenB:  new BN(0),
+    swapOutAmountTokenA: new BN(0),
+    tickArrayBitmap: [],
+    rewardInfos:     [],
+    day:   { volume:0, volumeFee:0, feeA:0, feeB:0, feeApr:0, rewardApr:{A:0,B:0,C:0}, apr:0, priceMin:0, priceMax:0 },
+    week:  { volume:0, volumeFee:0, feeA:0, feeB:0, feeApr:0, rewardApr:{A:0,B:0,C:0}, apr:0, priceMin:0, priceMax:0 },
+    month: { volume:0, volumeFee:0, feeA:0, feeB:0, feeApr:0, rewardApr:{A:0,B:0,C:0}, apr:0, priceMin:0, priceMax:0 },
+    tvl: 0,
+    lookupTableAccount: PublicKey.default,
+    startTime: s.openTime || 0,
+    exBitmapInfo: s.exBitmapInfo || {bitmap:[]} ,
+  };
+}
+
 
 export function createPoolKeys(
   id: PublicKey,

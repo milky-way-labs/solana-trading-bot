@@ -2,20 +2,19 @@ import { LiquidityStateV4 } from '@raydium-io/raydium-sdk';
 import { logger } from '../helpers';
 
 export class PoolCache {
-  private readonly keys: Map<string, { id: string; state: LiquidityStateV4, sold: boolean }> = new Map<
+  private readonly keys: Map<string, { id: string; state: LiquidityStateV4, sold: boolean, poolType: string }> = new Map<
     string,
-    { id: string; state: LiquidityStateV4, sold: boolean }
+    { id: string; state: LiquidityStateV4, sold: boolean, poolType: string }
   >();
 
-  public save(id: string, state: LiquidityStateV4) {
-    console.log(`state.baseMint.toString() ${state.baseMint.toString()}`);
+  public save(id: string, state: LiquidityStateV4, poolType: string) {
     if (!this.keys.has(state.baseMint.toString())) {
       logger.trace(`Caching new pool for mint: ${state.baseMint.toString()}`);
-      this.keys.set(state.baseMint.toString(), { id, state, sold: false });
+      this.keys.set(state.baseMint.toString(), { id, state, sold: false, poolType });
     }
   }
 
-  public async get(mint: string): Promise<{ id: string; state: LiquidityStateV4, sold: boolean }> {
+  public async get(mint: string): Promise<{ id: string; state: LiquidityStateV4, sold: boolean, poolType: string }> {
       return this.keys.get(mint)!;
   }
 
