@@ -71,6 +71,7 @@ import {
   USE_TA,
   parsePoolInfo,
   PoolInfo,
+  poolInfoToLiquidityStateLayoutV4,
 } from './helpers';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
@@ -298,30 +299,28 @@ const runListener = async () => {
     return BigInt('0x' + reversed.toString('hex'));
   }
 
-  listeners.on('pool', async (pool: { poolType: string, accountInfo: KeyedAccountInfo | PoolInfo, poolAddress: string | null }) => {
+  listeners.on('pool', async (pool: { poolType: string, accountInfo: KeyedAccountInfo | PoolInfo, poolAddress: string | null, creationTime: number | null }) => {
     try {
       let poolState: any;
       let poolOpenTime: number;
       let baseMint: string;
       let poolInfo: any;
-      logger.info('pool received');
-      logger.info(`pool ${pool.poolType}`);
+      logger.info(`pool recieved ${pool.poolType}`);
       switch (pool.poolType) {
         case 'clmm':
           try {
             poolInfo = pool.accountInfo
             logger.info(`account info ${poolInfo}`);
             baseMint = poolInfo.mintB.toString();
-            poolOpenTime = poolInfo.startTime
-            logger.info(`pool received ${baseMint} ${pool.poolAddress}`)
-            logger.info(`poolOpenTime ${poolOpenTime}`);
+            poolOpenTime = pool.creationTime;
+            poolState = poolInfoToLiquidityStateLayoutV4(poolInfo, poolOpenTime);
+            logger.info(`pool baseMint: ${baseMint} poolAddress: ${pool.poolAddress} creationTime: ${poolOpenTime}`);
             break;
           } catch (decodeError) {
             logger.error(`Errore decodifica pool CLMM: ${decodeError}`);
             return;
           }
         case 'amm':
-          logger.info(`amm pool received`);
           if ('accountInfo' in pool.accountInfo) {
             poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(pool.accountInfo.accountInfo.data);
           } else {
@@ -331,26 +330,22 @@ const runListener = async () => {
           baseMint = poolState.baseMint.toString();
           break;
         case 'cpmm':
-          // fixme
+          // TODO: implement cpmm
           break;
         default:
           // codice da eseguire se nessun valore corrisponde
           break;
       }
 
-
       // Verifica se il pool è già noto
       const exists = await poolCache.get(baseMint);
       let currentTimestamp = Math.floor(new Date().getTime() / 1000);
-      logger.info(`type of poolOpenTime ${typeof poolOpenTime}`);
-      logger.info(`type of runTimestamp ${typeof runTimestamp}`);
       let lag = currentTimestamp - poolOpenTime;
       logger.info(`lag ${lag}`);
       if (!exists && poolOpenTime > runTimestamp) {
         // Formattazione sicura delle date per il log
         let poolOpenTimeFormatted;
         let runTimestampFormatted;
-        logger.info('formattazione date')
         
         try {
           poolOpenTimeFormatted =  new Date(poolOpenTime * 1000).toISOString();
@@ -372,17 +367,26 @@ const runListener = async () => {
           accountId = undefined; // or handle PoolInfo case if needed
         }
 
-        logger.info(`poolOpenTime prima di poolCache.save ${poolOpenTime}`)
+        logger.info(`baseMint: ${baseMint} accountId: ${accountId}`);
+
         logger.info(`Nuovo pool trovato: pool open time: ${poolOpenTimeFormatted}, run timestamp: ${runTimestampFormatted} ${accountId}, base: ${baseMint}, tipo: ${pool.poolType}`);
         // Salva solo i dati minimi necessari
         poolCache.save(accountId, poolState);
         
         // Log del nuovo token trovato in modo sicuro
         try {
+          logger.info(`baseMint: ${baseMint} accountId: ${accountId}`);
           await logFind(baseMint, new Date(poolOpenTime * 1000));
         } catch (e) {
           logger.warn(`Errore nel log del nuovo token: ${e}`);
           await logFind(baseMint, new Date()); // Usa la data corrente come fallback
+        }
+        if (MAX_LAG != 0 && lag > MAX_LAG) {
+          logger.trace(`Lag too high: ${lag} sec`);
+          return;
+        } else {
+          logger.trace(`Lag: ${lag} sec`);
+          await bot.buy(new PublicKey(accountId), poolState, lag);
         }
       }
     } catch (error) {

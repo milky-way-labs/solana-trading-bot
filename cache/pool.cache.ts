@@ -8,6 +8,7 @@ export class PoolCache {
   >();
 
   public save(id: string, state: LiquidityStateV4) {
+    console.log(`state.baseMint.toString() ${state.baseMint.toString()}`);
     if (!this.keys.has(state.baseMint.toString())) {
       logger.trace(`Caching new pool for mint: ${state.baseMint.toString()}`);
       this.keys.set(state.baseMint.toString(), { id, state, sold: false });

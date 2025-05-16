@@ -288,7 +288,7 @@ export class Listeners extends EventEmitter {
                   5  = token_vault_0
                   6  = token_vault_1
                 */
-                
+                let creationTime = tx.blockTime;
                 if (clmmIx) {
                   // indice 2 nella lista di account dell'istruzione
                   const poolPubkey = clmmIx.accounts[2]; // Use account directly instead of using as index
@@ -299,7 +299,7 @@ export class Listeners extends EventEmitter {
                   logger.info(`NUOVA CLMM POOL → ${poolAddressStr}`);
 
                   if (data.mintA.toBase58() == 'So11111111111111111111111111111111111111112')
-                    this.emit('pool', {poolType: 'clmm', accountInfo: data, poolAddress: poolAddressStr});
+                    this.emit('pool', {poolType: 'clmm', accountInfo: data, poolAddress: poolAddressStr, creationTime: creationTime});
                   else
                   logger.info(`Mint not equal to QUOTE_MINT ${data.mintA.toBase58()}`)
                 }
@@ -308,7 +308,7 @@ export class Listeners extends EventEmitter {
             }
             
           }
-          else console.log('failed');
+          else logger.warn('failed');
           
         }      
       },
