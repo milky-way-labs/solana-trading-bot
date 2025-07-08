@@ -29,8 +29,10 @@ export class InitialLiquidityUsdcValueFilter implements Filter {
             };
           }
         } else {
-          logger.error({ mint: poolKeys.baseMint }, `Failed to check initial liquidity value`);
-          throw new Error('Cannot read initial liquidity value');
+          logger.debug({ mint: poolKeys.baseMint }, `Unable to extract initial liquidity value (token might be too new or site unavailable)`);
+          // Non lanciare errore, continua il filtro come se il valore fosse sufficiente
+          // Questo permette al bot di continuare quando i dati non sono disponibili
+          return { ok: true, message: 'InitialLiquidityValue -> Could not verify, allowing through' };
         }
       }
 
