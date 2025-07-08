@@ -1,6 +1,6 @@
 import { Filter, FilterResult } from './pool-filters';
 import { LiquidityPoolKeysV4, Token, TokenAmount } from '@raydium-io/raydium-sdk';
-import { extractInitialUsdcAmount, getToken, logger } from '../helpers';
+import { extractInitialTokenAmount, getToken, logger } from '../helpers';
 
 export class InitialLiquidityUsdcValueFilter implements Filter {
   constructor(
@@ -8,24 +8,23 @@ export class InitialLiquidityUsdcValueFilter implements Filter {
     private readonly minInitialLiquidityValue: TokenAmount,
   ) {}
 
-  async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
+  async execute(poolKeys: LiquidityPoolKeysV4|): Promise<FilterResult> {
     try {
       let inRange = true;
 
       if (!this.minInitialLiquidityValue?.isZero()) {
         // fixme: proxy
-        // fixme: wsol!!!
-        const usdc = await extractInitialUsdcAmount(poolKeys.baseMint.toString(), null);
+        const initialTokenAmount = await extractInitialTokenAmount(poolKeys.baseMint.toString(), this.quoteToken.symbol);
 
-        if (usdc) {
-          const usdcAmount = new TokenAmount(getToken('USDC'), usdc, false);
+        if (initialTokenAmount) {
+          const tokenAmount = new TokenAmount(getToken(this.quoteToken.symbol), initialTokenAmount, false);
 
-          inRange = usdcAmount.raw.gte(this.minInitialLiquidityValue.raw);
+          inRange = tokenAmount.raw.gte(this.minInitialLiquidityValue.raw);
 
           if (!inRange) {
             return {
               ok: false,
-              message: `InitialLiquidityValue -> Initial liquidity value ${usdcAmount.toFixed()} < ${this.minInitialLiquidityValue.toFixed()}`,
+              message: `InitialLiquidityValue -> Initial liquidity value ${tokenAmount.toFixed()} < ${this.minInitialLiquidityValue.toFixed()}`,
             };
           }
         } else {

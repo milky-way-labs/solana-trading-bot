@@ -28,6 +28,7 @@ import { Messaging } from './messaging';
 import { WhitelistCache } from './cache/whitelist.cache';
 import { TechnicalAnalysisCache } from './cache/technical-analysis.cache';
 import { logBuy, logSell } from './db';
+import { ClmmKeys } from '@raydium-io/raydium-sdk-v2';
 
 export interface BotConfig {
   wallet: Keypair;
@@ -147,7 +148,7 @@ export class Bot {
     return await this.whitelistCache.isInList(this.connection, poolKeys);
   }
 
-  public async buy(accountId: PublicKey, poolState: LiquidityStateV4, lag: number = 0) {
+  public async buy(accountId: PublicKey, poolState: any, poolKeys: LiquidityPoolKeysV4|ClmmKeys, lag: number = 0) {
     logger.trace({ mint: poolState.baseMint }, `Processing new pool...`);
 
     const whitelistSnipe = await this.whitelistSnipe(accountId, poolState);
@@ -178,22 +179,25 @@ export class Bot {
 
     await this.semaphore.acquire();
 
-    try {
-      const [market, mintAta] = await Promise.all([
-        this.marketStorage.get(poolState.marketId.toString()),
-        getAssociatedTokenAddress(poolState.baseMint, this.config.wallet.publicKey),
-      ]);
-      const poolKeys: LiquidityPoolKeysV4 = createPoolKeys(accountId, poolState, market);
+    const mintAta = await getAssociatedTokenAddress(poolState.baseMint, this.config.wallet.publicKey);
 
+    try {
       if (!whitelistSnipe) {
         if (!this.config.useSnipeList) {
 
           const match = await this.filterMatch(poolKeys);
-
-          if (!match) {
-            logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because pool doesn't match filters`);
-            return;
+          if (poolKeys.baseMint) {
+            if (!match) {
+              logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because pool doesn't match filters`);
+              return;
+            }
+          } else {
+            if (!match) {
+              logger.trace({ mint: poolKeys.id.toString() }, `Skipping buy because pool doesn't match filters`);
+              return;
+            }
           }
+
         }
 
         let buySignal = await this.tradeSignals.waitForBuySignal(poolKeys);

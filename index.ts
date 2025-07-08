@@ -1,7 +1,7 @@
 import { MarketCache, PoolCache } from './cache';
 import { Listeners } from './listeners';
 import { Connection, KeyedAccountInfo, Keypair } from '@solana/web3.js';
-import { LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, Token, TokenAmount } from '@raydium-io/raydium-sdk';
+import { MARKET_STATE_LAYOUT_V3, Token, TokenAmount } from '@raydium-io/raydium-sdk';
 import { AccountLayout, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Bot, BotConfig } from './bot';
 import { DefaultTransactionExecutor, TransactionExecutor } from './transactions';
@@ -47,6 +47,7 @@ import {
   MAX_TOKENS_AT_THE_TIME,
   MIN_INITIAL_LIQUIDITY_VALUE,
   MIN_POOL_SIZE,
+  PoolEventPayload,
   PRE_LOAD_EXISTING_MARKETS,
   PRICE_CHECK_DURATION,
   PRICE_CHECK_INTERVAL,
@@ -275,25 +276,28 @@ const runListener = async () => {
     marketCache.save(updatedAccountInfo.accountId.toString(), marketState);
   });
 
-  listeners.on('pool', async (updatedAccountInfo: KeyedAccountInfo) => {
-    const poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(updatedAccountInfo.accountInfo.data);
-    const poolOpenTime = parseInt(poolState.poolOpenTime.toString());
-    const exists = await poolCache.get(poolState.baseMint.toString());
-
+  listeners.on('pool', async (poolEvent: PoolEventPayload) => {
+    const exists = await poolCache.get(poolEvent.poolState.baseMint.toString());
     let currentTimestamp = Math.floor(new Date().getTime() / 1000);
-    let lag = currentTimestamp - poolOpenTime;
+    let lag = currentTimestamp - poolEvent.poolState.openTime;
 
-    if (!exists && poolOpenTime > runTimestamp) {
-      poolCache.save(updatedAccountInfo.accountId.toString(), poolState);
+    console.log(
+      new Date(poolEvent.poolState.openTime * 1000).toLocaleString(),
+      new Date(runTimestamp * 1000).toLocaleString(),
+    );
+    console.log(poolEvent.poolState.openTime, runTimestamp);
+    if (!exists && poolEvent.poolState.openTime > runTimestamp) {
+      logger.info(poolEvent.poolState);
+      poolCache.save(poolEvent.poolState.id.toString(), poolEvent.poolState);
 
-      await logFind(poolState.baseMint.toString(), new Date(poolOpenTime * 1000));
+      await logFind(poolEvent.poolState.baseMint.toString(), new Date(poolEvent.poolState.openTime * 1000));
 
       if (MAX_LAG != 0 && lag > MAX_LAG) {
         logger.trace(`Lag too high: ${lag} sec`);
         return;
       } else {
         logger.trace(`Lag: ${lag} sec`);
-        await bot.buy(updatedAccountInfo.accountId, poolState, lag);
+        await bot.buy(poolEvent.poolState.id, poolEvent.poolState, poolEvent.poolKeys, lag);
       }
     }
   });

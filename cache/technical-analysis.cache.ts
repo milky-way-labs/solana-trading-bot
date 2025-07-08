@@ -1,6 +1,7 @@
 import { Liquidity, LiquidityPoolKeysV4 } from '@raydium-io/raydium-sdk';
 import { COMMITMENT_LEVEL, RPC_ENDPOINT, logger } from '../helpers';
 import { Connection } from '@solana/web3.js';
+import { ClmmKeys } from '@raydium-io/raydium-sdk-v2';
 
 export class TechnicalAnalysisCache_Entity {
   constructor(process, poolKeys, prices) {
@@ -18,7 +19,7 @@ export class TechnicalAnalysisCache_Entity {
 
   process: NodeJS.Timeout;
   expiryTime: Date;
-  poolKeys: LiquidityPoolKeysV4;
+  poolKeys: LiquidityPoolKeysV4|ClmmKeys;
   done: boolean;
   prices: {
     value: number,
@@ -42,7 +43,7 @@ export class TechnicalAnalysisCache {
   }
 
 
-  public addNew(mint: string, poolKeys: LiquidityPoolKeysV4) {
+  public addNew(mint: string, poolKeys: LiquidityPoolKeysV4|ClmmKeys) {
     let connection = new Connection(RPC_ENDPOINT, {
       commitment: COMMITMENT_LEVEL
     });

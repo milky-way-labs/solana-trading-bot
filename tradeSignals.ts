@@ -6,6 +6,7 @@ import { TechnicalAnalysis } from "./technicalAnalysis";
 import BN from "bn.js";
 import { Messaging } from "./messaging";
 import { TechnicalAnalysisCache } from "./cache/technical-analysis.cache";
+import { ClmmKeys } from '@raydium-io/raydium-sdk-v2';
 
 export class TradeSignals {
 
@@ -21,15 +22,16 @@ export class TradeSignals {
         this.TA = new TechnicalAnalysis(config);
     }
 
-    public async waitForBuySignal(poolKeys: LiquidityPoolKeysV4) {
-        
+    public async waitForBuySignal(poolKeys: LiquidityPoolKeysV4|ClmmKeys) {
         if(!this.config.useTechnicalAnalysis){
             return true;
         }
 
-        this.technicalAnalysisCache.addNew(poolKeys.baseMint.toString(), poolKeys);
+        let poolKeysAddress = poolKeys.baseMint ?? poolKeys.id;
 
-        logger.trace({ mint: poolKeys.baseMint.toString() }, `Waiting for buy signal`);
+        this.technicalAnalysisCache.addNew(poolKeysAddress.toString(), poolKeys);
+
+        logger.trace({ mint: poolKeysAddress.toString() }, `Waiting for buy signal`);
 
         const totalTimeToCheck = this.config.buySignalTimeToWait;
         const interval = this.config.buySignalPriceInterval;
@@ -46,7 +48,7 @@ export class TradeSignals {
         do {
             try {
 
-                let prices = this.technicalAnalysisCache.getPrices(poolKeys.baseMint.toString());
+                let prices = this.technicalAnalysisCache.getPrices(poolKeysAddress.toString());
 
                 if(prices == null){
                     continue;
@@ -58,7 +60,7 @@ export class TradeSignals {
 
                     if (previousRSI !== currentRSI) {
                         logger.trace({ 
-                            mint: poolKeys.baseMint.toString()
+                            mint: poolKeysAddress.toString()
                         }, `(${timesChecked}) Waiting for buy signal: RSI: ${currentRSI.toFixed(3)}, MACD: ${macd.macd}, Signal: ${macd.signal}`);
                         previousRSI = currentRSI;
                     }
@@ -90,7 +92,7 @@ export class TradeSignals {
 
                     if (previousRSI !== RSI) {
                         logger.trace({
-                            mint: poolKeys.baseMint.toString()
+                            mint: poolKeysAddress.toString()
                         }, `(${timesChecked}) Waiting for buy signal: RSI: ${RSI.toFixed(3)}, RSI_EMA_11: ${RSI_EMA_11.toFixed(3)}, RSI_EMA_11 > RSI_EMA_11[-1]: ${RSI_prevEMA_11 < RSI_EMA_11}, macd>signal: ${isMacdAboveSignal}, price<ema_18: ${isEmaLAboveTokenPrice}, ema_3>ema_3[-1]: ${isEmaSAbovePrevEmaS}`);
                         previousRSI = RSI;
                     }
@@ -112,7 +114,7 @@ export class TradeSignals {
                 }
 
             } catch (e) {
-                logger.trace({ mint: poolKeys.baseMint.toString(), e }, `Failed to check token price`);
+                logger.trace({ mint: poolKeysAddress.toString(), e }, `Failed to check token price`);
                 continue;
             } finally {
                 timesChecked++;
@@ -124,7 +126,9 @@ export class TradeSignals {
     }
 
 
-    public async waitForSellSignal(amountIn: TokenAmount, poolKeys: LiquidityPoolKeysV4) {
+    public async waitForSellSignal(amountIn: TokenAmount, poolKeys: LiquidityPoolKeysV4|ClmmKeys) {
+        let poolKeysAddress
+
         this.technicalAnalysisCache.markAsDone(poolKeys.baseMint.toString());
 
         if (this.config.priceCheckDuration === 0 || this.config.priceCheckInterval === 0) {

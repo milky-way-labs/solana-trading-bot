@@ -1,4 +1,4 @@
-import { PublicKey } from '@solana/web3.js';
+import { KeyedAccountInfo, PublicKey } from '@solana/web3.js';
 import { Liquidity, LiquidityPoolKeys, LiquidityStateV4, MAINNET_PROGRAM_ID, Market } from '@raydium-io/raydium-sdk';
 import { MinimalMarketLayoutV3 } from './market';
 import * as puppeteer from 'puppeteer';
@@ -49,13 +49,30 @@ interface ProxyConfig {
   password?: string;
 }
 
+export interface PoolEventPayload {
+  poolState: PoolState;
+  poolKeys: any;
+}
+
+export enum PoolType {
+  CLMM,
+  AMMV4,
+}
+
+export interface PoolState {
+  baseMint,
+  marketId,
+  openTime,
+  id,
+}
+
 /**
  * Estrae la quantità di WSOL depositata per un token specificato
  * @param tokenAddress Indirizzo del token Solana da analizzare
  * @param proxy Configurazione proxy opzionale
  * @returns La quantità di WSOL come numero o null se non trovato
  */
-export async function extractInitialUsdcAmount(tokenAddress: string, proxy?: ProxyConfig): Promise<number | null> {
+export async function extractInitialTokenAmount(tokenAddress: string, symbol: string, proxy?: ProxyConfig): Promise<number | null> {
   console.debug('Inizializzazione del browser...');
 
   // Configurazione del browser con supporto proxy
@@ -111,7 +128,7 @@ export async function extractInitialUsdcAmount(tokenAddress: string, proxy?: Pro
       const rows = document.querySelectorAll('table tr');
 
       rows.forEach((row, rowIndex) => {
-        if ((row.textContent || '').includes('WSOL')) {
+        if ((row.textContent || '').includes(symbol)) {
           const cells = row.querySelectorAll('td');
           const cellsData: string[] = [];
 
