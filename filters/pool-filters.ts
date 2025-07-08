@@ -16,6 +16,7 @@ import {
   logger } from '../helpers';
 import { HoldersCountFilter, TopHolderDistributionFilter } from './holders';
 import { BlacklistFilter } from './blacklist.filter';
+import { SymbolBlacklistFilter } from './symbol-blacklist.filter';
 import { BlacklistCache } from '../cache';
 import { InitialLiquidityUsdcValueFilter } from './initial-liquidity-usdc-value.filter';
 
@@ -67,6 +68,9 @@ export class PoolFilters {
 
     // not optional
     this.filters.push(new BlacklistFilter(connection, blacklistCache));
+    
+    // Symbol/Name blacklist filter (always active, but only filters if blacklist exists)
+    this.filters.push(new SymbolBlacklistFilter(connection));
 
     if (!args.minPoolSize.isZero() || !args.maxPoolSize.isZero()) {
       this.filters.push(

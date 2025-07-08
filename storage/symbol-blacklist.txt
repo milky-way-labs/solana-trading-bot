@@ -1,0 +1,23 @@
+# Symbol/Name Blacklist
+# Questo file contiene simboli e nomi di token da bloccare
+# Un simbolo per riga, supporta commenti con #
+
+# Termini scam comuni
+SCAM
+RUG
+FAKE
+TEST
+COPY
+CLONE
+RUGPULL
+HONEYPOT
+DUMP
+
+
+# Token specifici da bloccare
+TESLA
+WLFI
+PORNHUB
+DEEPSEEKAI
+
+# Aggiungi qui i nuovi simboli da bloccare... 
