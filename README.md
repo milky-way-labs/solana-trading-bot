@@ -26,6 +26,101 @@ To run the script you need to:
 You should see the following output:  
 ![output](readme/output.png)
 
+## Dashboard Access
+
+The bot includes a powerful web dashboard for real-time monitoring and control.
+
+### Starting the Dashboard
+
+1. **Install dashboard dependencies:**
+   ```bash
+   cd api-server
+   npm install
+   ```
+
+2. **Start the API server:**
+   ```bash
+   cd api-server
+   npm start
+   ```
+
+3. **Verify the server is running:**
+   - You should see: `API Server running on port 3000`
+   - Default admin user will be created automatically
+
+### Accessing the Dashboard
+
+1. **Open your web browser and navigate to:**
+   ```
+   http://localhost:3000
+   ```
+
+2. **Login with default credentials:**
+   - **Username:** `admin`
+   - **Password:** `password`
+
+3. **⚠️ IMPORTANT:** Change the default password after first login!
+
+### 📋 Prerequisites for Dashboard Data
+
+**To see live trading data in the dashboard, ensure:**
+- ✅ The main bot is running (`npm run start`)
+- ✅ The API server is running (`cd api-server && npm start`)
+- ✅ Both processes are running simultaneously
+
+**Note:** The dashboard shows real-time data only when the main trading bot is active. Historical data will be preserved between sessions.
+
+### Dashboard Features
+
+The dashboard provides:
+
+- **📊 Real-time Bot Monitoring**: Live status, current trades, and performance metrics
+- **🎛️ Bot Control**: Start, stop, and configure bot remotely
+- **📈 Trading Analytics**: Profit/loss charts, success rates, and trade history
+- **🛡️ Blacklist Management**: View and manage auto-blacklisted tokens
+- **⚡ Live Updates**: Real-time data via WebSocket connection
+- **📝 Trade Logs**: Detailed transaction history and bot activity
+
+### Quick Health Check
+
+Run the automated verification script:
+```bash
+./check-dashboard.sh
+```
+
+This will verify:
+- ✅ Bot process status
+- ✅ Dashboard accessibility  
+- ✅ Database connectivity
+- ✅ Auto-blacklist functionality
+
+### Troubleshooting Dashboard
+
+If you can't access the dashboard:
+
+1. **Check if API server is running:**
+   ```bash
+   ps aux | grep "ts-node server.ts"
+   ```
+
+2. **Restart the API server:**
+   ```bash
+   cd api-server
+   npm start
+   ```
+
+3. **Check logs for errors:**
+   ```bash
+   tail -f api-server/server.log
+   ```
+
+4. **Verify port 3000 is available:**
+   ```bash
+   netstat -an | grep :3000
+   ```
+
+For detailed setup documentation, see `DASHBOARD_QUICK_START.md`.
+
 ### Configuration
 
 #### Database
@@ -106,6 +201,17 @@ You should see the following output:
 
 Note: When using snipe list filters below will be disabled.
 
+#### Auto-Blacklist Protection
+
+The bot includes an intelligent auto-blacklist system that learns from rug pulls:
+
+- **Automatic Detection**: When a token drops more than the configured threshold or is detected as a rug pull, the bot automatically adds its ticker/symbol to the blacklist.
+- **Dual Triggering**: Auto-blacklisting activates when:
+  1. The `SKIP_SELLING_IF_LOST_MORE_THAN` threshold is exceeded (immediate rug detection)
+  2. A token loses more than `AUTO_BLACKLIST_LOSS_THRESHOLD` percentage during sale
+- **Symbol-Based Protection**: Unlike address-based blacklists, this system blocks tokens by ticker/symbol, preventing scammers from reusing popular names with new contracts.
+- **Persistent Learning**: Auto-blacklisted tokens are saved to `storage/symbol-blacklist.txt` with timestamps and reasons for future reference.
+
 #### Filters
 
 - `FILTER_CHECK_INTERVAL` - Interval in milliseconds for checking if pool match the filters.
@@ -127,7 +233,11 @@ Note: When using snipe list filters below will be disabled.
 - `MIN_INITIAL_LIQUIDITY_VALUE` - Bot will buy only if the initial USDC QUOTE_AMOUNT liquidity value provided by 'ADD LIQUIDITY' transactions is less than or equal the specified amount.
   - Set `0` to disable.
 - `BLACKLIST_REFRESH_INTERVAL` - Interval in milliseconds to refresh the blacklist.
-  - Blacklist checks update authority metadata of token, for "creator" wallets. 
+  - Blacklist checks update authority metadata of token, for "creator" wallets.
+- `ENABLE_AUTO_BLACKLIST_RUGS` - Set to `true` to enable automatic blacklisting of rugged tokens by ticker/symbol.
+  - When enabled, tokens that rug pull will be automatically added to the symbol blacklist to prevent future purchases.
+- `AUTO_BLACKLIST_LOSS_THRESHOLD` - Loss percentage threshold to trigger auto-blacklisting (default: 80%).
+  - If a token loses more than this percentage, it will be automatically added to symbol blacklist. 
 - `WHITELIST_REFRESH_INTERVAL` - Interval in milliseconds to refresh the whitelist 
   - Whitelist checks update authority metadata of token, for "creator" wallets. 
 
