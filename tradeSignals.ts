@@ -1,5 +1,5 @@
 import { Liquidity, LiquidityPoolKeysV4, Percent, TokenAmount } from "@raydium-io/raydium-sdk";
-import { logger, sleep } from "./helpers";
+import { logger, sleep, AutoBlacklist } from "./helpers";
 import { Connection } from "@solana/web3.js";
 import { BotConfig } from "./bot";
 import { TechnicalAnalysis } from "./technicalAnalysis";
@@ -11,14 +11,17 @@ export class TradeSignals {
 
     private readonly TA: TechnicalAnalysis;
     private readonly stopLoss = new Map<string, TokenAmount>();
+    private readonly autoBlacklist: AutoBlacklist;
 
     constructor(
         private readonly connection: Connection,
         readonly config: BotConfig,
         private readonly messaging: Messaging,
-        private readonly technicalAnalysisCache: TechnicalAnalysisCache
+        private readonly technicalAnalysisCache: TechnicalAnalysisCache,
+        autoBlacklist: AutoBlacklist
     ) {
         this.TA = new TechnicalAnalysis(config);
+        this.autoBlacklist = autoBlacklist;
     }
 
     public async waitForBuySignal(poolKeys: LiquidityPoolKeysV4) {
@@ -195,6 +198,10 @@ export class TradeSignals {
                         );
 
                         await this.messaging.sendTelegramMessage(`🚨RUG RUG RUG🚨\n\nMint <code>${poolKeys.baseMint.toString()}</code>\nToken dropped more than ${this.config.skipSellingIfLostMoreThan}%, sell stopped\nInitial: <code>${this.config.quoteAmount.toFixed()}</code>\nCurrent: <code>${amountOut.toFixed()}</code>`, poolKeys.baseMint.toString())
+
+                        // Auto-blacklist the rugged token
+                        const lossPercentage = this.config.skipSellingIfLostMoreThan;
+                        await this.autoBlacklist.addRuggedToken(poolKeys.baseMint.toString(), 'RUG_DETECTED', lossPercentage);
 
                         this.stopLoss.delete(poolKeys.baseMint.toString());
                         return false;

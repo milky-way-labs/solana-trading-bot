@@ -80,6 +80,10 @@ export const MIN_INITIAL_LIQUIDITY_VALUE = retrieveEnvVariable('MIN_INITIAL_LIQU
 export const USE_SNIPE_LIST = retrieveEnvVariable('USE_SNIPE_LIST', logger) === 'true';
 export const SNIPE_LIST_REFRESH_INTERVAL = Number(retrieveEnvVariable('SNIPE_LIST_REFRESH_INTERVAL', logger));
 export const BLACKLIST_REFRESH_INTERVAL = Number(retrieveEnvVariable('BLACKLIST_REFRESH_INTERVAL', logger));
+
+// Auto-blacklist configuration
+export const ENABLE_AUTO_BLACKLIST_RUGS = process.env.ENABLE_AUTO_BLACKLIST_RUGS?.toLowerCase() === 'true' || true;
+export const AUTO_BLACKLIST_LOSS_THRESHOLD = Number(process.env.AUTO_BLACKLIST_LOSS_THRESHOLD || 80);
 export const WHITELIST_REFRESH_INTERVAL = Number(retrieveEnvVariable('WHITELIST_REFRESH_INTERVAL', logger));
 
 //Holders filters
