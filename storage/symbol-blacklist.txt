@@ -19,6 +19,9 @@ TESLA
 WLFI
 PORNHUB
 DEEPSEEKAI
+TIKTOK
+SpaceX
+PENGU
 
 # Aggiungi qui i nuovi simboli da bloccare... 
 # AUTO-ADDED RUG PULLS (DO NOT EDIT MANUALLY)
