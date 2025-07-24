@@ -28,9 +28,11 @@ import { Messaging } from './messaging';
 import { WhitelistCache } from './cache/whitelist.cache';
 import { TechnicalAnalysisCache } from './cache/technical-analysis.cache';
 import { logBuy, logSell } from './db';
+import { getMetadataAccountDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
 // Dashboard integration
-import { DatabaseService, DatabaseTrade } from './api-server/services/DatabaseService';
+import { DatabaseService, DatabaseTrade, DatabaseTokenCandidate } from './api-server/services/DatabaseService';
 import { v4 as uuidv4 } from 'uuid';
+import { getPdaMetadataKey } from '@raydium-io/raydium-sdk';
 
 export interface BotConfig {
   wallet: Keypair;
@@ -152,6 +154,19 @@ export class Bot {
     }
   }
 
+  private async getTokenSymbol(connection: Connection, mint: PublicKey): Promise<string | undefined> {
+    try {
+      const metadataPDA = getPdaMetadataKey(mint);
+      const metadataAccount = await connection.getAccountInfo(metadataPDA.publicKey, connection.commitment);
+      if (!metadataAccount?.data) return undefined;
+      const serializer = getMetadataAccountDataSerializer();
+      const [metadata] = serializer.deserialize(metadataAccount.data);
+      return metadata.symbol?.trim();
+    } catch {
+      return undefined;
+    }
+  }
+
   async validate() {
     try {
       await getAccount(this.connection, this.config.quoteAta, this.connection.commitment);
@@ -184,9 +199,22 @@ export class Bot {
     logger.trace({ mint: poolState.baseMint }, `Processing new pool...`);
 
     const whitelistSnipe = await this.whitelistSnipe(accountId, poolState);
+    const tokenSymbol = await this.getTokenSymbol(this.connection, poolState.baseMint);
 
+    // Log token candidate: non in snipe list
     if (this.config.useSnipeList && !this.snipeListCache?.isInList(poolState.baseMint.toString())) {
       logger.debug({ mint: poolState.baseMint.toString() }, `Skipping buy because token is not in a snipe list`);
+      if (this.dashboardService) {
+        await this.dashboardService.saveTokenCandidate({
+          id: uuidv4(),
+          botId: 'main-trading-bot',
+          tokenMint: poolState.baseMint.toString(),
+          tokenSymbol,
+          poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
+          reason: 'not_in_snipe_list',
+          timestamp: new Date(),
+        });
+      }
       return;
     }
 
@@ -204,6 +232,17 @@ export class Bot {
         { mint: poolState.baseMint.toString() },
         `Skipping buy because max tokens to process at the same time is ${this.config.maxTokensAtTheTime} and currently ${numberOfActionsBeingProcessed} tokens is being processed`,
       );
+      if (this.dashboardService) {
+        await this.dashboardService.saveTokenCandidate({
+          id: uuidv4(),
+          botId: 'main-trading-bot',
+          tokenMint: poolState.baseMint.toString(),
+          tokenSymbol,
+          poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
+          reason: 'max_tokens_processing',
+          timestamp: new Date(),
+        });
+      }
       return;
     }
 
@@ -218,10 +257,29 @@ export class Bot {
 
       if (!whitelistSnipe) {
         if (!this.config.useSnipeList) {
-          const match = await this.filterMatch(poolKeys);
-
-          if (!match) {
-            logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because pool doesn't match filters`);
+          // Modifica: raccogli i motivi dei filtri
+          const filters = new PoolFilters(this.connection, {
+            quoteToken: this.config.quoteToken,
+            minPoolSize: this.config.minPoolSize,
+            maxPoolSize: this.config.maxPoolSize,
+            minInitialLiquidityValue: this.config.minInitialLiquidityValue,
+          }, this.blacklistCache);
+          const filterResults = await Promise.all(filters['filters'].map((f) => f.execute(poolKeys)));
+          const failed = filterResults.findIndex(r => !r.ok);
+          if (failed !== -1) {
+            const reason = filterResults[failed].message || 'filter_not_matched';
+            logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because pool doesn't match filters: ${reason}`);
+            if (this.dashboardService) {
+              await this.dashboardService.saveTokenCandidate({
+                id: uuidv4(),
+                botId: 'main-trading-bot',
+                tokenMint: poolKeys.baseMint.toString(),
+                tokenSymbol,
+                poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
+                reason,
+                timestamp: new Date(),
+              });
+            }
             return;
           }
         }
@@ -231,6 +289,17 @@ export class Bot {
         if (!buySignal) {
           await this.messaging.sendTelegramMessage(`😭Skipping buy signal😭\n\nMint <code>${poolKeys.baseMint.toString()}</code>`, poolState.baseMint.toString())
           logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because buy signal not received`);
+          if (this.dashboardService) {
+            await this.dashboardService.saveTokenCandidate({
+              id: uuidv4(),
+              botId: 'main-trading-bot',
+              tokenMint: poolKeys.baseMint.toString(),
+              tokenSymbol,
+              poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
+              reason: 'no_buy_signal',
+              timestamp: new Date(),
+            });
+          }
           return;
         }
       }
@@ -240,11 +309,22 @@ export class Bot {
         try {
           if ((Date.now() - startTime) > this.config.maxBuyDuration) {
             logger.info(`Not buying mint ${poolState.baseMint.toString()}, max buy ${this.config.maxBuyDuration/1000} sec timer exceeded!`);
+            if (this.dashboardService) {
+              await this.dashboardService.saveTokenCandidate({
+                id: uuidv4(),
+                botId: 'main-trading-bot',
+                tokenMint: poolKeys.baseMint.toString(),
+                tokenSymbol,
+                poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
+                reason: 'buy_timeout',
+                timestamp: new Date(),
+              });
+            }
             return;
           }
 
           logger.info(
-            { mint: poolState.baseMint.toString() },
+            { mint: poolKeys.baseMint.toString() },
             `Send buy transaction attempt: ${i + 1}/${this.config.maxBuyRetries}`,
           );
           const tokenOut = new Token(TOKEN_PROGRAM_ID, poolKeys.baseMint, poolKeys.baseDecimals);
@@ -272,7 +352,18 @@ export class Bot {
 
             await this.messaging.sendTelegramMessage(`💚Confirmed buy💚\n\nMint <code>${poolKeys.baseMint.toString()}</code>\nSignature <code>${result.signature}</code>`, poolState.baseMint.toString())
             await logBuy(poolKeys.baseMint.toString());
-            
+            // Log anche come candidato comprato
+            if (this.dashboardService) {
+              await this.dashboardService.saveTokenCandidate({
+                id: uuidv4(),
+                botId: 'main-trading-bot',
+                tokenMint: poolKeys.baseMint.toString(),
+                tokenSymbol,
+                poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
+                reason: 'bought',
+                timestamp: new Date(),
+              });
+            }
             // Log to dashboard
             await this.logTradeToDashboard({
               id: uuidv4(),
@@ -286,20 +377,19 @@ export class Bot {
               timestamp: new Date(),
               transactionHash: result.signature
             });
-            
             break;
           }
 
           logger.info(
             {
-              mint: poolState.baseMint.toString(),
+              mint: poolKeys.baseMint.toString(),
               signature: result.signature,
               error: result.error,
             },
             `Error confirming buy tx`,
           );
         } catch (error) {
-          logger.debug({ mint: poolState.baseMint.toString(), error }, `Error confirming buy transaction`);
+          logger.debug({ mint: poolKeys.baseMint.toString(), error }, `Error confirming buy transaction`);
         }
       }
     } catch (error) {

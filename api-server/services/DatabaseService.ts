@@ -27,6 +27,17 @@ export interface DatabaseTrade {
   transactionHash?: string;
 }
 
+export interface DatabaseTokenCandidate {
+  id: string;
+  botId: string;
+  tokenMint: string;
+  tokenSymbol?: string;
+  poolOpenTime?: number;
+  reason: string;
+  timestamp: Date;
+  extraData?: string; // JSON string for additional info
+}
+
 export class DatabaseService {
   private db: sqlite3.Database | null = null;
   private dbPath: string;
@@ -113,6 +124,19 @@ export class DatabaseService {
       )
     `;
 
+    const createTokenCandidatesTable = `
+      CREATE TABLE IF NOT EXISTS token_candidates (
+        id TEXT PRIMARY KEY,
+        bot_id TEXT NOT NULL,
+        token_mint TEXT NOT NULL,
+        token_symbol TEXT,
+        pool_open_time INTEGER,
+        reason TEXT NOT NULL,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        extra_data TEXT
+      )
+    `;
+
     const createIndexes = [
       'CREATE INDEX IF NOT EXISTS idx_bot_configs_enabled ON bot_configs(enabled)',
       'CREATE INDEX IF NOT EXISTS idx_metrics_bot_id ON metrics(bot_id)',
@@ -133,6 +157,7 @@ export class DatabaseService {
         this.db!.run(createBotConfigsTable);
         this.db!.run(createMetricsTable);
         this.db!.run(createTradesTable);
+        this.db!.run(createTokenCandidatesTable);
         
         // Create indexes
         createIndexes.forEach(indexSql => {
@@ -482,6 +507,33 @@ export class DatabaseService {
           totalVolume,
           winRate
         });
+      });
+    });
+  }
+
+  public async saveTokenCandidate(candidate: DatabaseTokenCandidate): Promise<void> {
+    const sql = `
+      INSERT INTO token_candidates 
+      (id, bot_id, token_mint, token_symbol, pool_open_time, reason, timestamp, extra_data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error('Database not initialized'));
+        return;
+      }
+      this.db.run(sql, [
+        candidate.id,
+        candidate.botId,
+        candidate.tokenMint,
+        candidate.tokenSymbol || null,
+        candidate.poolOpenTime || null,
+        candidate.reason,
+        candidate.timestamp.toISOString(),
+        candidate.extraData || null
+      ], (err) => {
+        if (err) reject(err);
+        else resolve();
       });
     });
   }
