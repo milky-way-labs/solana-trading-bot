@@ -18,6 +18,10 @@ export class SymbolBlacklistFilter implements Filter {
     setInterval(() => this.loadSymbolBlacklist(), 600000);
   }
 
+  getName(): string {
+    return 'SymbolBlacklistFilter';
+  }
+
   async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
     try {
       // Se la blacklist è vuota, non filtrare nulla
@@ -35,33 +39,51 @@ export class SymbolBlacklistFilter implements Filter {
       }
 
       const deserialize = metadataSerializer.deserialize(metadataAccount.data);
-      const tokenName = deserialize[0].name?.trim().toLowerCase() || '';
-      const tokenSymbol = deserialize[0].symbol?.trim().toLowerCase() || '';
+      
+      // Migliore gestione dell'encoding e pulizia dei caratteri
+      let tokenName = '';
+      let tokenSymbol = '';
+      
+      try {
+        // Converti i bytes in stringa e pulisci caratteri non validi
+        const rawName = deserialize[0].name || '';
+        const rawSymbol = deserialize[0].symbol || '';
+        
+        // Rimuovi caratteri null e non printabili, mantieni solo caratteri validi
+        tokenName = this.cleanString(rawName);
+        tokenSymbol = this.cleanString(rawSymbol);
+        
+      } catch (encodingError) {
+        logger.debug({ mint: poolKeys.baseMint }, `SymbolBlacklist -> Encoding error: ${encodingError}`);
+        return { ok: true }; // In caso di errore di encoding, lasciamo passare
+      }
 
       // Controlla se nome o simbolo sono nella blacklist
       for (const blacklistedItem of this.symbolBlacklist) {
         const blacklistedLower = blacklistedItem.toLowerCase();
+        const tokenNameLower = tokenName.toLowerCase();
+        const tokenSymbolLower = tokenSymbol.toLowerCase();
 
         // Controllo esatto
-        if (tokenName === blacklistedLower || tokenSymbol === blacklistedLower) {
+        if (tokenNameLower === blacklistedLower || tokenSymbolLower === blacklistedLower) {
           return { 
             ok: false, 
-            message: `SymbolBlacklist -> 🚫 BLOCKED: "${tokenSymbol}" (${tokenName}) - exact match with "${blacklistedItem}"` 
+            message: `SymbolBlacklist -> BLOCKED: "${tokenSymbol}" (${tokenName}) - exact match with "${blacklistedItem}"` 
           };
         }
 
         // Controllo se contiene la stringa blacklistata
-        if (tokenName.includes(blacklistedLower) || tokenSymbol.includes(blacklistedLower)) {
+        if (tokenNameLower.includes(blacklistedLower) || tokenSymbolLower.includes(blacklistedLower)) {
           return { 
             ok: false, 
-            message: `SymbolBlacklist -> 🚫 BLOCKED: "${tokenSymbol}" (${tokenName}) - contains "${blacklistedItem}"` 
+            message: `SymbolBlacklist -> BLOCKED: "${tokenSymbol}" (${tokenName}) - contains "${blacklistedItem}"` 
           };
         }
       }
 
       logger.trace({ 
         mint: poolKeys.baseMint 
-      }, `SymbolBlacklist -> ✅ PASSED: "${tokenSymbol}" (${tokenName})`);
+      }, `SymbolBlacklist -> PASSED: "${tokenSymbol}" (${tokenName})`);
 
       return { ok: true };
 
@@ -69,6 +91,16 @@ export class SymbolBlacklistFilter implements Filter {
       logger.error({ mint: poolKeys.baseMint }, `SymbolBlacklist -> Failed to check symbol blacklist: ${e}`);
       return { ok: true }; // In caso di errore, lasciamo passare per non bloccare tutto
     }
+  }
+
+  private cleanString(input: string): string {
+    if (!input) return '';
+    
+    // Rimuovi caratteri null, di controllo e non printabili
+    return input
+      .replace(/\0/g, '') // Rimuovi caratteri null
+      .replace(/[\x00-\x1F\x7F-\x9F]/g, '') // Rimuovi caratteri di controllo
+      .trim(); // Rimuovi spazi all'inizio e fine
   }
 
   private loadSymbolBlacklist() {
@@ -97,7 +129,9 @@ export class SymbolBlacklistFilter implements Filter {
       this.symbolBlacklist = data
         .split('\n')
         .map((line) => line.trim())
-        .filter((line) => line.length > 0 && !line.startsWith('#')); // Ignora righe vuote e commenti
+        .filter((line) => line.length > 0 && !line.startsWith('#')) // Ignora righe vuote e commenti
+        .map((line) => this.cleanString(line)) // Pulisci ogni elemento della blacklist
+        .filter((line) => line.length > 0); // Rimuovi elementi vuoti dopo la pulizia
 
       if (this.symbolBlacklist.length !== previousCount) {
         logger.info(`SymbolBlacklist -> Loaded ${this.symbolBlacklist.length} blacklisted symbols/names`);

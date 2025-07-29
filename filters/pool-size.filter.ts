@@ -11,6 +11,10 @@ export class PoolSizeFilter implements Filter {
     private readonly maxPoolSize: TokenAmount,
   ) {}
 
+  getName(): string {
+    return 'PoolSizeFilter';
+  }
+
   async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
     try {
       const response = await this.connection.getTokenAccountBalance(poolKeys.quoteVault, this.connection.commitment);

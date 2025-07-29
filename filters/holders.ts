@@ -7,6 +7,10 @@ import { logger, HOLDER_MIN_AMOUNT, TOP_HOLDER_MAX_PERCENTAGE, ABNORMAL_HOLDER_N
 export class HoldersCountFilter implements Filter {
     constructor(private readonly connection: Connection) { }
 
+    getName(): string {
+        return 'HoldersCountFilter';
+    }
+
     async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
         const baseThisCase = poolKeys.baseMint.toBase58();
         const accounts = await this.connection.getProgramAccounts(
@@ -46,6 +50,10 @@ interface HolderInfo {
 
 export class TopHolderDistributionFilter implements Filter {
     constructor(private readonly connection: Connection) { }
+
+    getName(): string {
+        return 'TopHolderDistributionFilter';
+    }
 
     async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
         try {

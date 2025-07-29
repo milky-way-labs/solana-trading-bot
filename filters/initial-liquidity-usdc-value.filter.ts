@@ -8,6 +8,10 @@ export class InitialLiquidityUsdcValueFilter implements Filter {
     private readonly minInitialLiquidityValue: TokenAmount,
   ) {}
 
+  getName(): string {
+    return 'InitialLiquidityUsdcValueFilter';
+  }
+
   async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
     try {
       let inRange = true;

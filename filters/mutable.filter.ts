@@ -24,6 +24,10 @@ export class MutableFilter implements Filter {
     }
   }
 
+  getName(): string {
+    return 'MutableFilter';
+  }
+
   async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
     try {
       const metadataPDA = getPdaMetadataKey(poolKeys.baseMint);

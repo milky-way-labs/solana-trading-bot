@@ -8,6 +8,10 @@ export class BurnFilter implements Filter {
 
   constructor(private readonly connection: Connection) {}
 
+  getName(): string {
+    return 'BurnFilter';
+  }
+
   async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
     if (this.cachedResult) {
       return this.cachedResult;

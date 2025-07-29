@@ -22,6 +22,10 @@ export class RenouncedFreezeFilter implements Filter {
     }
   }
 
+  getName(): string {
+    return 'RenouncedFreezeFilter';
+  }
+
   async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
     if (this.cachedResult) {
       return this.cachedResult;

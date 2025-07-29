@@ -22,6 +22,7 @@ import { InitialLiquidityUsdcValueFilter } from './initial-liquidity-usdc-value.
 
 export interface Filter {
   execute(poolKeysV4: LiquidityPoolKeysV4): Promise<FilterResult>;
+  getName(): string;
 }
 
 export interface FilterResult {
@@ -34,6 +35,12 @@ export interface PoolFilterArgs {
   maxPoolSize: TokenAmount;
   minInitialLiquidityValue: TokenAmount;
   quoteToken: Token;
+}
+
+export interface FilterExecutionResult {
+  passed: boolean;
+  failedFilters: string[];
+  filterDetails: string;
 }
 
 export class PoolFilters {
@@ -110,5 +117,40 @@ export class PoolFilters {
     }
 
     return false;
+  }
+
+  public async executeWithDetails(poolKeys: LiquidityPoolKeysV4): Promise<FilterExecutionResult> {
+    if (this.filters.length === 0) {
+      return {
+        passed: true,
+        failedFilters: [],
+        filterDetails: 'No filters configured'
+      };
+    }
+
+    const results = await Promise.all(
+      this.filters.map(async (filter) => {
+        const result = await filter.execute(poolKeys);
+        return {
+          filterName: filter.getName(),
+          result
+        };
+      })
+    );
+
+    const failedFilters = results
+      .filter(r => !r.result.ok)
+      .map(r => r.filterName);
+
+    const filterDetails = results
+      .filter(r => !r.result.ok)
+      .map(r => `${r.filterName}: ${r.result.message || 'failed'}`)
+      .join('; ');
+
+    return {
+      passed: failedFilters.length === 0,
+      failedFilters,
+      filterDetails: filterDetails || 'All filters passed'
+    };
   }
 }

@@ -14,6 +14,10 @@ export class BlacklistFilter implements Filter {
     private readonly blacklistCache: BlacklistCache
   ) { }
 
+  getName(): string {
+    return 'BlacklistFilter';
+  }
+
   async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
     try {
 
