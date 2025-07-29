@@ -27,7 +27,7 @@ import { TradeSignals } from './tradeSignals';
 import { Messaging } from './messaging';
 import { WhitelistCache } from './cache/whitelist.cache';
 import { TechnicalAnalysisCache } from './cache/technical-analysis.cache';
-import { logBuy, logSell } from './db';
+import { logBuy, logSell, logTokenCandidate } from './db';
 import { getMetadataAccountDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
 // Dashboard integration
 import { DatabaseService, DatabaseTrade, DatabaseTokenCandidate } from './api-server/services/DatabaseService';
@@ -204,6 +204,18 @@ export class Bot {
     // Log token candidate: non in snipe list
     if (this.config.useSnipeList && !this.snipeListCache?.isInList(poolState.baseMint.toString())) {
       logger.debug({ mint: poolState.baseMint.toString() }, `Skipping buy because token is not in a snipe list`);
+      
+      // Log nel database
+      await logTokenCandidate(
+        poolState.baseMint.toString(),
+        tokenSymbol,
+        new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
+        false,
+        'not_in_snipe_list',
+        'Token non presente nella snipe list',
+        lag
+      );
+      
       if (this.dashboardService) {
         await this.dashboardService.saveTokenCandidate({
           id: uuidv4(),
@@ -232,6 +244,18 @@ export class Bot {
         { mint: poolState.baseMint.toString() },
         `Skipping buy because max tokens to process at the same time is ${this.config.maxTokensAtTheTime} and currently ${numberOfActionsBeingProcessed} tokens is being processed`,
       );
+      
+      // Log nel database
+      await logTokenCandidate(
+        poolState.baseMint.toString(),
+        tokenSymbol,
+        new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
+        false,
+        'max_tokens_processing',
+        `Max tokens processing limit reached (${numberOfActionsBeingProcessed}/${this.config.maxTokensAtTheTime})`,
+        lag
+      );
+      
       if (this.dashboardService) {
         await this.dashboardService.saveTokenCandidate({
           id: uuidv4(),
@@ -264,11 +288,21 @@ export class Bot {
             maxPoolSize: this.config.maxPoolSize,
             minInitialLiquidityValue: this.config.minInitialLiquidityValue,
           }, this.blacklistCache);
-          const filterResults = await Promise.all(filters['filters'].map((f) => f.execute(poolKeys)));
-          const failed = filterResults.findIndex(r => !r.ok);
-          if (failed !== -1) {
-            const reason = filterResults[failed].message || 'filter_not_matched';
-            logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because pool doesn't match filters: ${reason}`);
+          const filterResult = await filters.executeWithDetails(poolKeys);
+          if (!filterResult.passed) {
+            logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because pool doesn't match filters: ${filterResult.filterDetails}`);
+            
+            // Log nel database con dettagli dei filtri
+            await logTokenCandidate(
+              poolKeys.baseMint.toString(),
+              tokenSymbol,
+              new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
+              false,
+              'filters_not_passed',
+              filterResult.filterDetails,
+              lag
+            );
+            
             if (this.dashboardService) {
               await this.dashboardService.saveTokenCandidate({
                 id: uuidv4(),
@@ -276,7 +310,7 @@ export class Bot {
                 tokenMint: poolKeys.baseMint.toString(),
                 tokenSymbol,
                 poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
-                reason,
+                reason: 'filters_not_passed',
                 timestamp: new Date(),
               });
             }
@@ -289,6 +323,18 @@ export class Bot {
         if (!buySignal) {
           await this.messaging.sendTelegramMessage(`😭Skipping buy signal😭\n\nMint <code>${poolKeys.baseMint.toString()}</code>`, poolState.baseMint.toString())
           logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because buy signal not received`);
+          
+          // Log nel database
+          await logTokenCandidate(
+            poolKeys.baseMint.toString(),
+            tokenSymbol,
+            new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
+            false,
+            'no_buy_signal',
+            'Segnale di acquisto non ricevuto',
+            lag
+          );
+          
           if (this.dashboardService) {
             await this.dashboardService.saveTokenCandidate({
               id: uuidv4(),
@@ -309,6 +355,18 @@ export class Bot {
         try {
           if ((Date.now() - startTime) > this.config.maxBuyDuration) {
             logger.info(`Not buying mint ${poolState.baseMint.toString()}, max buy ${this.config.maxBuyDuration/1000} sec timer exceeded!`);
+            
+            // Log nel database
+            await logTokenCandidate(
+              poolKeys.baseMint.toString(),
+              tokenSymbol,
+              new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
+              false,
+              'buy_timeout',
+              `Timeout di acquisto superato (${this.config.maxBuyDuration/1000}s)`,
+              lag
+            );
+            
             if (this.dashboardService) {
               await this.dashboardService.saveTokenCandidate({
                 id: uuidv4(),
@@ -352,6 +410,18 @@ export class Bot {
 
             await this.messaging.sendTelegramMessage(`💚Confirmed buy💚\n\nMint <code>${poolKeys.baseMint.toString()}</code>\nSignature <code>${result.signature}</code>`, poolState.baseMint.toString())
             await logBuy(poolKeys.baseMint.toString());
+            
+            // Log nel database come token comprato
+            await logTokenCandidate(
+              poolKeys.baseMint.toString(),
+              tokenSymbol,
+              new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
+              true,
+              undefined,
+              'Token comprato con successo',
+              lag
+            );
+            
             // Log anche come candidato comprato
             if (this.dashboardService) {
               await this.dashboardService.saveTokenCandidate({
@@ -394,6 +464,17 @@ export class Bot {
       }
     } catch (error) {
       logger.error({ mint: poolState.baseMint.toString(), error }, `Failed to buy token`);
+      
+      // Log nel database come token che ha fallito l'acquisto
+      await logTokenCandidate(
+        poolState.baseMint.toString(),
+        tokenSymbol,
+        new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
+        false,
+        'buy_failed',
+        `Errore durante l'acquisto: ${error}`,
+        lag
+      );
     } finally {
       this.semaphore.release();
     }
