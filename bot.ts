@@ -30,7 +30,7 @@ import { TechnicalAnalysisCache } from './cache/technical-analysis.cache';
 import { logBuy, logSell, logTokenCandidate } from './db';
 import { getMetadataAccountDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
 // Dashboard integration
-import { DatabaseService, DatabaseTrade, DatabaseTokenCandidate } from './api-server/services/DatabaseService';
+// import { DatabaseService, DatabaseTrade, DatabaseTokenCandidate } from './api-server/services/DatabaseService';
 import { v4 as uuidv4 } from 'uuid';
 import { getPdaMetadataKey } from '@raydium-io/raydium-sdk';
 
@@ -88,7 +88,7 @@ export class Bot {
   private readonly blacklistCache?: BlacklistCache;
   private readonly whitelistCache?: WhitelistCache;
   private readonly autoBlacklist: AutoBlacklist;
-  private dashboardService?: DatabaseService;
+  // private dashboardService?: DatabaseService;
 
   private readonly semaphore: Semaphore;
   private sellExecutionCount = 0;
@@ -128,31 +128,47 @@ export class Bot {
     }
 
     // Initialize dashboard database service
-    this.initializeDashboardService();
+    // this.initializeDashboardService();
   }
 
-  private async initializeDashboardService() {
-    try {
-      this.dashboardService = new DatabaseService();
-      await this.dashboardService.initialize();
-      logger.info('Dashboard database service initialized for trade logging');
-    } catch (error) {
-      logger.warn('Failed to initialize dashboard database service:', error);
-    }
+  // Funzione helper per separare data e ora
+  private formatDateAndTime(date: Date): { date: string, time: string } {
+    // Formatta la data come YYYY-MM-DD
+    const dateStr = date.toISOString().split('T')[0];
+    
+    // Formatta l'ora come HH:mm:ss
+    const timeStr = date.toTimeString().split(' ')[0];
+    
+    return { date: dateStr, time: timeStr };
   }
 
-  private async logTradeToDashboard(trade: DatabaseTrade) {
-    if (!this.dashboardService) {
-      return;
-    }
+  // private async initializeDashboardService() {
+  //   try {
+  //     this.dashboardService = new DatabaseService();
+  //     await this.dashboardService.initialize();
+  //     logger.info('Dashboard database service initialized for trade logging');
+  //   } catch (error) {
+  //     logger.warn('Failed to initialize dashboard database service:', error);
+  //   }
+  // }
 
-    try {
-      await this.dashboardService.saveTrade(trade);
-      logger.debug(`Trade logged to dashboard: ${trade.type} ${trade.tokenMint}`);
-    } catch (error) {
-      logger.error('Failed to log trade to dashboard:', error);
-    }
-  }
+  // private async logTradeToDashboard(trade: DatabaseTrade) {
+  //   if (!this.dashboardService) {
+  //     return;
+  //   }
+
+  //   try {
+  //     const { date, time } = this.formatDateAndTime(trade.timestamp);
+  //     await this.dashboardService.saveTrade({
+  //       ...trade,
+  //       date,
+  //       time
+  //     });
+  //     logger.debug(`Trade logged to dashboard: ${trade.type} ${trade.tokenMint}`);
+  //   } catch (error) {
+  //     logger.error('Failed to log trade to dashboard:', error);
+  //   }
+  // }
 
   private async getTokenSymbol(connection: Connection, mint: PublicKey): Promise<string | undefined> {
     try {
@@ -196,37 +212,36 @@ export class Bot {
   }
 
   public async buy(accountId: PublicKey, poolState: LiquidityStateV4, lag: number = 0) {
-    logger.trace({ mint: poolState.baseMint }, `Processing new pool...`);
+    const tokenSymbol = await this.getTokenSymbol(this.connection, poolState.baseMint);
+    
+    // Registra sempre il token candidato all'inizio
+    await logTokenCandidate(
+      poolState.baseMint.toString(),
+      tokenSymbol,
+      new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
+      'found',
+      undefined,
+      'Token trovato e in fase di valutazione',
+      lag
+    );
 
     const whitelistSnipe = await this.whitelistSnipe(accountId, poolState);
-    const tokenSymbol = await this.getTokenSymbol(this.connection, poolState.baseMint);
 
     // Log token candidate: non in snipe list
     if (this.config.useSnipeList && !this.snipeListCache?.isInList(poolState.baseMint.toString())) {
       logger.debug({ mint: poolState.baseMint.toString() }, `Skipping buy because token is not in a snipe list`);
       
-      // Log nel database
+      // Aggiorna il record esistente con il motivo di scarto
       await logTokenCandidate(
         poolState.baseMint.toString(),
         tokenSymbol,
         new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
-        false,
+        'filtered',
         'not_in_snipe_list',
         'Token non presente nella snipe list',
         lag
       );
       
-      if (this.dashboardService) {
-        await this.dashboardService.saveTokenCandidate({
-          id: uuidv4(),
-          botId: 'main-trading-bot',
-          tokenMint: poolState.baseMint.toString(),
-          tokenSymbol,
-          poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
-          reason: 'not_in_snipe_list',
-          timestamp: new Date(),
-        });
-      }
       return;
     }
 
@@ -245,28 +260,17 @@ export class Bot {
         `Skipping buy because max tokens to process at the same time is ${this.config.maxTokensAtTheTime} and currently ${numberOfActionsBeingProcessed} tokens is being processed`,
       );
       
-      // Log nel database
+      // Aggiorna il record esistente con il motivo di scarto
       await logTokenCandidate(
         poolState.baseMint.toString(),
         tokenSymbol,
         new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
-        false,
+        'filtered',
         'max_tokens_processing',
         `Max tokens processing limit reached (${numberOfActionsBeingProcessed}/${this.config.maxTokensAtTheTime})`,
         lag
       );
       
-      if (this.dashboardService) {
-        await this.dashboardService.saveTokenCandidate({
-          id: uuidv4(),
-          botId: 'main-trading-bot',
-          tokenMint: poolState.baseMint.toString(),
-          tokenSymbol,
-          poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
-          reason: 'max_tokens_processing',
-          timestamp: new Date(),
-        });
-      }
       return;
     }
 
@@ -292,28 +296,17 @@ export class Bot {
           if (!filterResult.passed) {
             logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because pool doesn't match filters: ${filterResult.filterDetails}`);
             
-            // Log nel database con dettagli dei filtri
+            // Aggiorna il record esistente con i dettagli dei filtri
             await logTokenCandidate(
               poolKeys.baseMint.toString(),
               tokenSymbol,
               new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
-              false,
+              'filtered',
               'filters_not_passed',
               filterResult.filterDetails,
               lag
             );
             
-            if (this.dashboardService) {
-              await this.dashboardService.saveTokenCandidate({
-                id: uuidv4(),
-                botId: 'main-trading-bot',
-                tokenMint: poolKeys.baseMint.toString(),
-                tokenSymbol,
-                poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
-                reason: 'filters_not_passed',
-                timestamp: new Date(),
-              });
-            }
             return;
           }
         }
@@ -324,28 +317,17 @@ export class Bot {
           await this.messaging.sendTelegramMessage(`😭Skipping buy signal😭\n\nMint <code>${poolKeys.baseMint.toString()}</code>`, poolState.baseMint.toString())
           logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because buy signal not received`);
           
-          // Log nel database
+          // Aggiorna il record esistente con il motivo di scarto
           await logTokenCandidate(
             poolKeys.baseMint.toString(),
             tokenSymbol,
             new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
-            false,
+            'filtered',
             'no_buy_signal',
             'Segnale di acquisto non ricevuto',
             lag
           );
           
-          if (this.dashboardService) {
-            await this.dashboardService.saveTokenCandidate({
-              id: uuidv4(),
-              botId: 'main-trading-bot',
-              tokenMint: poolKeys.baseMint.toString(),
-              tokenSymbol,
-              poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
-              reason: 'no_buy_signal',
-              timestamp: new Date(),
-            });
-          }
           return;
         }
       }
@@ -356,28 +338,17 @@ export class Bot {
           if ((Date.now() - startTime) > this.config.maxBuyDuration) {
             logger.info(`Not buying mint ${poolState.baseMint.toString()}, max buy ${this.config.maxBuyDuration/1000} sec timer exceeded!`);
             
-            // Log nel database
+            // Aggiorna il record esistente con il motivo di scarto
             await logTokenCandidate(
               poolKeys.baseMint.toString(),
               tokenSymbol,
               new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
-              false,
+              'filtered',
               'buy_timeout',
               `Timeout di acquisto superato (${this.config.maxBuyDuration/1000}s)`,
               lag
             );
             
-            if (this.dashboardService) {
-              await this.dashboardService.saveTokenCandidate({
-                id: uuidv4(),
-                botId: 'main-trading-bot',
-                tokenMint: poolKeys.baseMint.toString(),
-                tokenSymbol,
-                poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
-                reason: 'buy_timeout',
-                timestamp: new Date(),
-              });
-            }
             return;
           }
 
@@ -416,37 +387,44 @@ export class Bot {
               poolKeys.baseMint.toString(),
               tokenSymbol,
               new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
-              true,
+              'bought',
               undefined,
               'Token comprato con successo',
               lag
             );
             
             // Log anche come candidato comprato
-            if (this.dashboardService) {
-              await this.dashboardService.saveTokenCandidate({
-                id: uuidv4(),
-                botId: 'main-trading-bot',
-                tokenMint: poolKeys.baseMint.toString(),
-                tokenSymbol,
-                poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
-                reason: 'bought',
-                timestamp: new Date(),
-              });
-            }
+            // if (this.dashboardService) {
+            //   const { date, time } = this.formatDateAndTime(new Date());
+            //   await this.dashboardService.saveTokenCandidate({
+            //     id: uuidv4(),
+            //     botId: 'main-trading-bot',
+            //     tokenMint: poolKeys.baseMint.toString(),
+            //     tokenSymbol,
+            //     poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
+            //     reason: 'bought',
+            //     timestamp: new Date(),
+            //     date,
+            //     time
+            //   });
+            // }
             // Log to dashboard
-            await this.logTradeToDashboard({
-              id: uuidv4(),
-              botId: 'main-trading-bot',
-              type: 'buy',
-              tokenMint: poolKeys.baseMint.toString(),
-              tokenSymbol: undefined,
-              amount: parseFloat(this.config.quoteAmount.toFixed()),
-              price: 0, // Will be updated when we get actual price
-              profit: undefined,
-              timestamp: new Date(),
-              transactionHash: result.signature
-            });
+            const tradeTimestamp = new Date();
+            const { date, time } = this.formatDateAndTime(tradeTimestamp);
+            // await this.logTradeToDashboard({
+            //   id: uuidv4(),
+            //   botId: 'main-trading-bot',
+            //   type: 'buy',
+            //   tokenMint: poolKeys.baseMint.toString(),
+            //   tokenSymbol: undefined,
+            //   amount: parseFloat(this.config.quoteAmount.toFixed()),
+            //   price: 0, // Will be updated when we get actual price
+            //   profit: undefined,
+            //   timestamp: tradeTimestamp,
+            //   date,
+            //   time,
+            //   transactionHash: result.signature
+            // });
             break;
           }
 
@@ -470,7 +448,7 @@ export class Bot {
         poolState.baseMint.toString(),
         tokenSymbol,
         new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
-        false,
+        'filtered',
         'buy_failed',
         `Errore durante l'acquisto: ${error}`,
         lag
@@ -573,18 +551,22 @@ export class Bot {
                     await logSell(rawAccount.mint.toString(), percentageChange);
                     
                     // Log to dashboard
-                    await this.logTradeToDashboard({
-                      id: uuidv4(),
-                      botId: 'main-trading-bot',
-                      type: 'sell',
-                      tokenMint: rawAccount.mint.toString(),
-                      tokenSymbol: undefined,
-                      amount: parseFloat(tokenAmountIn.toFixed()),
-                      price: post - pre,
-                      profit: profitOrLoss,
-                      timestamp: new Date(),
-                      transactionHash: result.signature
-                    });
+                    const sellTimestamp = new Date();
+                    const { date, time } = this.formatDateAndTime(sellTimestamp);
+                    // await this.logTradeToDashboard({
+                    //   id: uuidv4(),
+                    //   botId: 'main-trading-bot',
+                    //   type: 'sell',
+                    //   tokenMint: rawAccount.mint.toString(),
+                    //   tokenSymbol: undefined,
+                    //   amount: parseFloat(tokenAmountIn.toFixed()),
+                    //   price: post - pre,
+                    //   profit: profitOrLoss,
+                    //   timestamp: sellTimestamp,
+                    //   date,
+                    //   time,
+                    //   transactionHash: result.signature
+                    // });
                     
                     if (percentageChange < -AUTO_BLACKLIST_LOSS_THRESHOLD) {
                       await this.autoBlacklist.addRuggedToken(rawAccount.mint.toString(), 'HIGH_LOSS', Math.abs(percentageChange));

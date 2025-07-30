@@ -16,13 +16,37 @@ export class Trade {
   findDateTime: Date;
 
   @Column()
+  findDate: string; // YYYY-MM-DD
+
+  @Column()
+  findTime: string; // HH:mm:ss
+
+  @Column()
   poolOpenDateTime: Date;
+
+  @Column()
+  poolOpenDate: string; // YYYY-MM-DD
+
+  @Column()
+  poolOpenTime: string; // HH:mm:ss
 
   @Column()
   buyDateTime: Date;
 
   @Column({ nullable: true })
+  buyDate?: string; // YYYY-MM-DD
+
+  @Column({ nullable: true })
+  buyTime?: string; // HH:mm:ss
+
+  @Column({ nullable: true })
   sellDateTime?: Date;
+
+  @Column({ nullable: true })
+  sellDate?: string; // YYYY-MM-DD
+
+  @Column({ nullable: true })
+  sellTime?: string; // HH:mm:ss
 
   @Column({ type: 'float', nullable: true })
   gainLossPercentage?: number;
@@ -40,37 +64,31 @@ export class TokenCandidate {
   tokenAddress: string;
 
   @Column({ nullable: true })
-  tokenSymbol?: string;
+  symbol?: string;
 
   @Column()
-  findDateTime: Date;
+  findTimestamp: Date;
 
   @Column()
-  poolOpenDateTime: Date;
+  poolOpenDate: string; // YYYY-MM-DD
 
   @Column()
-  bought: boolean;
+  poolOpenTime: string; // HH:mm:ss
+
+  @Column()
+  status: string; // 'found', 'bought', 'sold', 'filtered', 'timeout', etc.
 
   @Column({ nullable: true })
-  buyDateTime?: Date;
+  reason?: string; // Why it was not bought or sold
 
   @Column({ nullable: true })
-  sellDateTime?: Date;
-
-  @Column({ type: 'float', nullable: true })
-  gainLossPercentage?: number;
+  filterInfo?: string; // Detailed filter information
 
   @Column({ nullable: true })
-  notBoughtReason?: string;
-
-  @Column({ nullable: true })
-  filterDetails?: string;
+  latency?: number; // Lag in seconds
 
   @Column()
   instanceId: string;
-
-  @Column({ nullable: true })
-  lag?: number;
 }
 
 let connection: Connection | null = null;
@@ -88,20 +106,6 @@ export async function initDB() {
   }
 }
 
-export async function logFind(tokenAddress: string, poolOpenDateTime: Date): Promise<void> {
-  if (!MONGODB_URI) return;
-  if (!connection) await initDB();
-
-  const repo = getMongoRepository(Trade);
-  const trade = new Trade();
-  trade.tokenAddress = tokenAddress;
-  trade.findDateTime = toItalianTime(new Date());
-  trade.poolOpenDateTime = toItalianTime(poolOpenDateTime);
-  trade.instanceId = INSTANCE_ID;
-
-  await repo.save(trade);
-}
-
 // Funzione helper per convertire data in timezone italiano
 function toItalianTime(date: Date): Date {
   // Crea una data che rappresenti l'orario italiano come se fosse UTC
@@ -117,33 +121,93 @@ function toItalianTime(date: Date): Date {
   return new Date(date.getTime() - (finalOffset * 60000));
 }
 
+// Funzione helper per separare data e ora
+function formatDateAndTime(date: Date): { date: string, time: string } {
+  const italianDate = toItalianTime(date);
+  
+  // Formatta la data come YYYY-MM-DD
+  const dateStr = italianDate.toISOString().split('T')[0];
+  
+  // Formatta l'ora come HH:mm:ss
+  const timeStr = italianDate.toTimeString().split(' ')[0];
+  
+  return { date: dateStr, time: timeStr };
+}
+
+export async function logFind(tokenAddress: string, poolOpenDateTime: Date): Promise<void> {
+  if (!MONGODB_URI) return;
+  if (!connection) await initDB();
+
+  const repo = getMongoRepository(Trade);
+  const trade = new Trade();
+  trade.tokenAddress = tokenAddress;
+  
+  const now = new Date();
+  const { date: findDate, time: findTime } = formatDateAndTime(now);
+  const { date: poolOpenDate, time: poolOpenTime } = formatDateAndTime(poolOpenDateTime);
+  
+  trade.findDateTime = toItalianTime(now);
+  trade.findDate = findDate;
+  trade.findTime = findTime;
+  trade.poolOpenDateTime = toItalianTime(poolOpenDateTime);
+  trade.poolOpenDate = poolOpenDate;
+  trade.poolOpenTime = poolOpenTime;
+  trade.instanceId = INSTANCE_ID;
+
+  await repo.save(trade);
+}
+
 export async function logTokenCandidate(
   tokenAddress: string, 
   tokenSymbol: string | undefined,
   poolOpenDateTime: Date, 
-  bought: boolean, 
-  notBoughtReason?: string,
-  filterDetails?: string,
-  lag?: number
+  status: string,
+  reason?: string,
+  filterInfo?: string,
+  latency?: number
 ): Promise<void> {
   if (!MONGODB_URI) return;
   if (!connection) await initDB();
 
   const repo = getMongoRepository(TokenCandidate);
-  const candidate = new TokenCandidate();
-  candidate.tokenAddress = tokenAddress;
-  candidate.tokenSymbol = tokenSymbol;
   
-  // Converti esplicitamente in orario italiano
-  candidate.findDateTime = toItalianTime(new Date());
-  candidate.poolOpenDateTime = toItalianTime(poolOpenDateTime);
-  candidate.bought = bought;
-  candidate.notBoughtReason = notBoughtReason;
-  candidate.filterDetails = filterDetails;
-  candidate.lag = lag;
-  candidate.instanceId = INSTANCE_ID;
+  // Cerca se esiste già un record per questo token
+  const existingCandidate = await repo.findOne({
+    where: {
+      tokenAddress,
+      instanceId: INSTANCE_ID
+    },
+    order: { findTimestamp: -1 } // Prendi il più recente
+  });
 
-  await repo.save(candidate);
+  const now = new Date();
+  const { date: poolOpenDate, time: poolOpenTime } = formatDateAndTime(poolOpenDateTime);
+  
+  if (existingCandidate) {
+    // Aggiorna il record esistente
+    existingCandidate.symbol = tokenSymbol || existingCandidate.symbol;
+    existingCandidate.status = status;
+    existingCandidate.reason = reason || existingCandidate.reason;
+    existingCandidate.filterInfo = filterInfo || existingCandidate.filterInfo;
+    existingCandidate.latency = latency || existingCandidate.latency;
+    
+    await repo.save(existingCandidate);
+  } else {
+    // Crea un nuovo record
+    const candidate = new TokenCandidate();
+    candidate.tokenAddress = tokenAddress;
+    candidate.symbol = tokenSymbol;
+    candidate.findTimestamp = toItalianTime(now);
+    candidate.poolOpenDate = poolOpenDate;
+    candidate.poolOpenTime = poolOpenTime;
+    candidate.status = status;
+    candidate.reason = reason;
+    candidate.filterInfo = filterInfo;
+    candidate.latency = latency;
+    candidate.instanceId = INSTANCE_ID;
+
+    await repo.save(candidate);
+  }
 }
 
 export async function logBuy(tokenAddress: string): Promise<void> {
@@ -160,7 +224,12 @@ export async function logBuy(tokenAddress: string): Promise<void> {
   });
 
   if (trade) {
-    trade.buyDateTime = toItalianTime(new Date());
+    const now = new Date();
+    const { date: buyDate, time: buyTime } = formatDateAndTime(now);
+    
+    trade.buyDateTime = toItalianTime(now);
+    trade.buyDate = buyDate;
+    trade.buyTime = buyTime;
     await repo.save(trade);
   }
 
@@ -169,14 +238,13 @@ export async function logBuy(tokenAddress: string): Promise<void> {
   const candidate = await candidateRepo.findOne({
     where: {
       tokenAddress,
-      bought: true,
-      buyDateTime: null,
+      status: 'found',
       instanceId: INSTANCE_ID
     }
   });
 
   if (candidate) {
-    candidate.buyDateTime = toItalianTime(new Date());
+    candidate.status = 'bought';
     await candidateRepo.save(candidate);
   }
 }
@@ -195,7 +263,12 @@ export async function logSell(tokenAddress: string, gainLossPercentage: number):
   });
 
   if (trade) {
-    trade.sellDateTime = toItalianTime(new Date());
+    const now = new Date();
+    const { date: sellDate, time: sellTime } = formatDateAndTime(now);
+    
+    trade.sellDateTime = toItalianTime(now);
+    trade.sellDate = sellDate;
+    trade.sellTime = sellTime;
     trade.gainLossPercentage = gainLossPercentage;
     await repo.save(trade);
   }
@@ -205,15 +278,13 @@ export async function logSell(tokenAddress: string, gainLossPercentage: number):
   const candidate = await candidateRepo.findOne({
     where: {
       tokenAddress,
-      bought: true,
-      sellDateTime: null,
+      status: 'bought',
       instanceId: INSTANCE_ID
     }
   });
 
   if (candidate) {
-    candidate.sellDateTime = toItalianTime(new Date());
-    candidate.gainLossPercentage = gainLossPercentage;
+    candidate.status = 'sold';
     await candidateRepo.save(candidate);
   }
 }

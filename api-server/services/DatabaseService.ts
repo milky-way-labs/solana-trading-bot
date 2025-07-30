@@ -6,6 +6,8 @@ import { BotConfig } from './BotManager';
 export interface DatabaseMetrics {
   botId: string;
   timestamp: Date;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm:ss
   totalTrades: number;
   successfulTrades: number;
   totalProfit: number;
@@ -24,6 +26,8 @@ export interface DatabaseTrade {
   price: number;
   profit?: number;
   timestamp: Date;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm:ss
   transactionHash?: string;
 }
 
@@ -35,6 +39,8 @@ export interface DatabaseTokenCandidate {
   poolOpenTime?: number;
   reason: string;
   timestamp: Date;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm:ss
   extraData?: string; // JSON string for additional info
 }
 
@@ -98,6 +104,8 @@ export class DatabaseService {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         bot_id TEXT NOT NULL,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        date TEXT NOT NULL,
+        time TEXT NOT NULL,
         total_trades INTEGER DEFAULT 0,
         successful_trades INTEGER DEFAULT 0,
         total_profit REAL DEFAULT 0,
@@ -119,6 +127,8 @@ export class DatabaseService {
         price REAL NOT NULL,
         profit REAL,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        date TEXT NOT NULL,
+        time TEXT NOT NULL,
         transaction_hash TEXT,
         FOREIGN KEY (bot_id) REFERENCES bot_configs (id) ON DELETE CASCADE
       )
@@ -133,6 +143,8 @@ export class DatabaseService {
         pool_open_time INTEGER,
         reason TEXT NOT NULL,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        date TEXT NOT NULL,
+        time TEXT NOT NULL,
         extra_data TEXT
       )
     `;
@@ -141,9 +153,12 @@ export class DatabaseService {
       'CREATE INDEX IF NOT EXISTS idx_bot_configs_enabled ON bot_configs(enabled)',
       'CREATE INDEX IF NOT EXISTS idx_metrics_bot_id ON metrics(bot_id)',
       'CREATE INDEX IF NOT EXISTS idx_metrics_timestamp ON metrics(timestamp)',
+      'CREATE INDEX IF NOT EXISTS idx_metrics_date ON metrics(date)',
       'CREATE INDEX IF NOT EXISTS idx_trades_bot_id ON trades(bot_id)',
       'CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp)',
-      'CREATE INDEX IF NOT EXISTS idx_trades_type ON trades(type)'
+      'CREATE INDEX IF NOT EXISTS idx_trades_date ON trades(date)',
+      'CREATE INDEX IF NOT EXISTS idx_trades_type ON trades(type)',
+      'CREATE INDEX IF NOT EXISTS idx_token_candidates_date ON token_candidates(date)'
     ];
 
     return new Promise((resolve, reject) => {
@@ -167,6 +182,17 @@ export class DatabaseService {
         resolve();
       });
     });
+  }
+
+  // Funzione helper per separare data e ora
+  private formatDateAndTime(date: Date): { date: string, time: string } {
+    // Formatta la data come YYYY-MM-DD
+    const dateStr = date.toISOString().split('T')[0];
+    
+    // Formatta l'ora come HH:mm:ss
+    const timeStr = date.toTimeString().split(' ')[0];
+    
+    return { date: dateStr, time: timeStr };
   }
 
   // User Methods
@@ -333,8 +359,8 @@ export class DatabaseService {
   public async saveMetrics(metrics: DatabaseMetrics): Promise<void> {
     const sql = `
       INSERT INTO metrics 
-      (bot_id, timestamp, total_trades, successful_trades, total_profit, total_loss, current_positions, uptime)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (bot_id, timestamp, date, time, total_trades, successful_trades, total_profit, total_loss, current_positions, uptime)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     return new Promise((resolve, reject) => {
@@ -343,9 +369,13 @@ export class DatabaseService {
         return;
       }
 
+      const { date, time } = this.formatDateAndTime(metrics.timestamp);
+
       this.db.run(sql, [
         metrics.botId,
         metrics.timestamp.toISOString(),
+        date,
+        time,
         metrics.totalTrades,
         metrics.successfulTrades,
         metrics.totalProfit,
@@ -382,6 +412,8 @@ export class DatabaseService {
         const metrics = rows.map(row => ({
           botId: row.bot_id,
           timestamp: new Date(row.timestamp),
+          date: row.date,
+          time: row.time,
           totalTrades: row.total_trades,
           successfulTrades: row.successful_trades,
           totalProfit: row.total_profit,
@@ -399,8 +431,8 @@ export class DatabaseService {
   public async saveTrade(trade: DatabaseTrade): Promise<void> {
     const sql = `
       INSERT INTO trades 
-      (id, bot_id, type, token_mint, token_symbol, amount, price, profit, timestamp, transaction_hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, bot_id, type, token_mint, token_symbol, amount, price, profit, timestamp, date, time, transaction_hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     return new Promise((resolve, reject) => {
@@ -408,6 +440,8 @@ export class DatabaseService {
         reject(new Error('Database not initialized'));
         return;
       }
+
+      const { date, time } = this.formatDateAndTime(trade.timestamp);
 
       this.db.run(sql, [
         trade.id,
@@ -419,6 +453,8 @@ export class DatabaseService {
         trade.price,
         trade.profit || null,
         trade.timestamp.toISOString(),
+        date,
+        time,
         trade.transactionHash || null
       ], (err) => {
         if (err) reject(err);
@@ -457,6 +493,8 @@ export class DatabaseService {
           price: row.price,
           profit: row.profit,
           timestamp: new Date(row.timestamp),
+          date: row.date,
+          time: row.time,
           transactionHash: row.transaction_hash
         }));
         
@@ -514,14 +552,15 @@ export class DatabaseService {
   public async saveTokenCandidate(candidate: DatabaseTokenCandidate): Promise<void> {
     const sql = `
       INSERT INTO token_candidates 
-      (id, bot_id, token_mint, token_symbol, pool_open_time, reason, timestamp, extra_data)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (id, bot_id, token_mint, token_symbol, pool_open_time, reason, timestamp, date, time, extra_data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     return new Promise((resolve, reject) => {
       if (!this.db) {
         reject(new Error('Database not initialized'));
         return;
       }
+      const { date, time } = this.formatDateAndTime(candidate.timestamp);
       this.db.run(sql, [
         candidate.id,
         candidate.botId,
@@ -530,6 +569,8 @@ export class DatabaseService {
         candidate.poolOpenTime || null,
         candidate.reason,
         candidate.timestamp.toISOString(),
+        date,
+        time,
         candidate.extraData || null
       ], (err) => {
         if (err) reject(err);

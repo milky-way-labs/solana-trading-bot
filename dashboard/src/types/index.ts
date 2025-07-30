@@ -71,6 +71,8 @@ export interface BotMetrics {
 // System types
 export interface SystemMetrics {
   timestamp: Date;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm:ss
   totalBots: number;
   runningBots: number;
   stoppedBots: number;
@@ -134,6 +136,8 @@ export interface Trade {
   price: number;
   profit?: number;
   timestamp: Date;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm:ss
   transactionHash?: string;
 }
 
