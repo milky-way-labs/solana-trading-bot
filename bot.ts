@@ -314,7 +314,7 @@ export class Bot {
         let buySignal = await this.tradeSignals.waitForBuySignal(poolKeys);
 
         if (!buySignal) {
-          await this.messaging.sendTelegramMessage(`😭Skipping buy signal😭\n\nMint <code>${poolKeys.baseMint.toString()}</code>`, poolState.baseMint.toString())
+          await this.messaging.sendTelegramMessage(`😭Skipping buy signal😭\n\nToken: <b>${tokenSymbol || 'Unknown'}</b>\nMint: <code>${poolKeys.baseMint.toString()}</code>`, poolState.baseMint.toString())
           logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because buy signal not received`);
           
           // Aggiorna il record esistente con il motivo di scarto
@@ -379,7 +379,7 @@ export class Bot {
               `Confirmed buy tx`,
             );
 
-            await this.messaging.sendTelegramMessage(`💚Confirmed buy💚\n\nMint <code>${poolKeys.baseMint.toString()}</code>\nSignature <code>${result.signature}</code>`, poolState.baseMint.toString())
+            await this.messaging.sendTelegramMessage(`💚Confirmed buy💚\n\nToken: <b>${tokenSymbol || 'Unknown'}</b>\nMint: <code>${poolKeys.baseMint.toString()}</code>\nSignature: <code>${result.signature}</code>`, poolState.baseMint.toString())
             await logBuy(poolKeys.baseMint.toString());
             
             // Log nel database come token comprato
@@ -547,7 +547,10 @@ export class Bot {
                     let profitOrLoss = (post - pre) - quoteAmountNumber;
                     let percentageChange = (profitOrLoss / quoteAmountNumber) * 100
 
-                    await this.messaging.sendTelegramMessage(`⭕Confirmed sale at <b>${(post - pre).toFixed(5)}</b>⭕\n\n${profitOrLoss < 0 ? "🔴Loss " : "🟢Profit "}<code>${profitOrLoss.toFixed(5)} ${this.config.quoteToken.symbol} (${(percentageChange).toFixed(2)}%)</code>\n\nRetries <code>${i + 1}/${this.config.maxSellRetries}</code>`, rawAccount.mint.toString());
+                    // Recupera il simbolo del token per il messaggio
+                    const tokenSymbol = await this.getTokenSymbol(this.connection, poolData.state.baseMint);
+                    
+                    await this.messaging.sendTelegramMessage(`⭕Confirmed sale at <b>${(post - pre).toFixed(5)}</b>⭕\n\nToken: <b>${tokenSymbol || 'Unknown'}</b>\n${profitOrLoss < 0 ? "🔴Loss " : "🟢Profit "}<code>${profitOrLoss.toFixed(5)} ${this.config.quoteToken.symbol} (${(percentageChange).toFixed(2)}%)</code>\n\nRetries <code>${i + 1}/${this.config.maxSellRetries}</code>`, rawAccount.mint.toString());
                     await logSell(rawAccount.mint.toString(), percentageChange);
                     
                     // Log to dashboard
