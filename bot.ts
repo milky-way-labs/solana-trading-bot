@@ -27,11 +27,8 @@ import { TradeSignals } from './tradeSignals';
 import { Messaging } from './messaging';
 import { WhitelistCache } from './cache/whitelist.cache';
 import { TechnicalAnalysisCache } from './cache/technical-analysis.cache';
-import { logBuy, logSell, logTokenCandidate } from './db';
+import { logSell, logTokenCandidate } from './db';
 import { getMetadataAccountDataSerializer } from '@metaplex-foundation/mpl-token-metadata';
-// Dashboard integration
-// import { DatabaseService, DatabaseTrade, DatabaseTokenCandidate } from './api-server/services/DatabaseService';
-import { v4 as uuidv4 } from 'uuid';
 import { getPdaMetadataKey } from '@raydium-io/raydium-sdk';
 
 export interface BotConfig {
@@ -88,7 +85,6 @@ export class Bot {
   private readonly blacklistCache?: BlacklistCache;
   private readonly whitelistCache?: WhitelistCache;
   private readonly autoBlacklist: AutoBlacklist;
-  // private dashboardService?: DatabaseService;
 
   private readonly semaphore: Semaphore;
   private sellExecutionCount = 0;
@@ -131,44 +127,6 @@ export class Bot {
     // this.initializeDashboardService();
   }
 
-  // Funzione helper per separare data e ora
-  private formatDateAndTime(date: Date): { date: string, time: string } {
-    // Formatta la data come YYYY-MM-DD
-    const dateStr = date.toISOString().split('T')[0];
-    
-    // Formatta l'ora come HH:mm:ss
-    const timeStr = date.toTimeString().split(' ')[0];
-    
-    return { date: dateStr, time: timeStr };
-  }
-
-  // private async initializeDashboardService() {
-  //   try {
-  //     this.dashboardService = new DatabaseService();
-  //     await this.dashboardService.initialize();
-  //     logger.info('Dashboard database service initialized for trade logging');
-  //   } catch (error) {
-  //     logger.warn('Failed to initialize dashboard database service:', error);
-  //   }
-  // }
-
-  // private async logTradeToDashboard(trade: DatabaseTrade) {
-  //   if (!this.dashboardService) {
-  //     return;
-  //   }
-
-  //   try {
-  //     const { date, time } = this.formatDateAndTime(trade.timestamp);
-  //     await this.dashboardService.saveTrade({
-  //       ...trade,
-  //       date,
-  //       time
-  //     });
-  //     logger.debug(`Trade logged to dashboard: ${trade.type} ${trade.tokenMint}`);
-  //   } catch (error) {
-  //     logger.error('Failed to log trade to dashboard:', error);
-  //   }
-  // }
 
   private async getTokenSymbol(connection: Connection, mint: PublicKey): Promise<string | undefined> {
     try {
@@ -380,7 +338,6 @@ export class Bot {
             );
 
             await this.messaging.sendTelegramMessage(`💚Confirmed buy💚\n\nToken: <b>${tokenSymbol || 'Unknown'}</b>\nMint: <code>${poolKeys.baseMint.toString()}</code>\nSignature: <code>${result.signature}</code>`, poolState.baseMint.toString())
-            await logBuy(poolKeys.baseMint.toString());
             
             // Log nel database come token comprato
             await logTokenCandidate(
@@ -389,42 +346,10 @@ export class Bot {
               new Date(parseInt(poolState.poolOpenTime.toString()) * 1000),
               'bought',
               undefined,
-              'Token comprato con successo',
+              `Token comprato con successo - Signature: ${result.signature}`,
               lag
             );
             
-            // Log anche come candidato comprato
-            // if (this.dashboardService) {
-            //   const { date, time } = this.formatDateAndTime(new Date());
-            //   await this.dashboardService.saveTokenCandidate({
-            //     id: uuidv4(),
-            //     botId: 'main-trading-bot',
-            //     tokenMint: poolKeys.baseMint.toString(),
-            //     tokenSymbol,
-            //     poolOpenTime: parseInt(poolState.poolOpenTime.toString()),
-            //     reason: 'bought',
-            //     timestamp: new Date(),
-            //     date,
-            //     time
-            //   });
-            // }
-            // Log to dashboard
-            const tradeTimestamp = new Date();
-            const { date, time } = this.formatDateAndTime(tradeTimestamp);
-            // await this.logTradeToDashboard({
-            //   id: uuidv4(),
-            //   botId: 'main-trading-bot',
-            //   type: 'buy',
-            //   tokenMint: poolKeys.baseMint.toString(),
-            //   tokenSymbol: undefined,
-            //   amount: parseFloat(this.config.quoteAmount.toFixed()),
-            //   price: 0, // Will be updated when we get actual price
-            //   profit: undefined,
-            //   timestamp: tradeTimestamp,
-            //   date,
-            //   time,
-            //   transactionHash: result.signature
-            // });
             break;
           }
 
@@ -551,25 +476,7 @@ export class Bot {
                     const tokenSymbol = await this.getTokenSymbol(this.connection, poolData.state.baseMint);
                     
                     await this.messaging.sendTelegramMessage(`⭕Confirmed sale at <b>${(post - pre).toFixed(5)}</b>⭕\n\nToken: <b>${tokenSymbol || 'Unknown'}</b>\n${profitOrLoss < 0 ? "🔴Loss " : "🟢Profit "}<code>${profitOrLoss.toFixed(5)} ${this.config.quoteToken.symbol} (${(percentageChange).toFixed(2)}%)</code>\n\nRetries <code>${i + 1}/${this.config.maxSellRetries}</code>`, rawAccount.mint.toString());
-                    await logSell(rawAccount.mint.toString(), percentageChange);
-                    
-                    // Log to dashboard
-                    const sellTimestamp = new Date();
-                    const { date, time } = this.formatDateAndTime(sellTimestamp);
-                    // await this.logTradeToDashboard({
-                    //   id: uuidv4(),
-                    //   botId: 'main-trading-bot',
-                    //   type: 'sell',
-                    //   tokenMint: rawAccount.mint.toString(),
-                    //   tokenSymbol: undefined,
-                    //   amount: parseFloat(tokenAmountIn.toFixed()),
-                    //   price: post - pre,
-                    //   profit: profitOrLoss,
-                    //   timestamp: sellTimestamp,
-                    //   date,
-                    //   time,
-                    //   transactionHash: result.signature
-                    // });
+                    await logSell(rawAccount.mint.toString(), percentageChange, tokenSymbol);
                     
                     if (percentageChange < -AUTO_BLACKLIST_LOSS_THRESHOLD) {
                       await this.autoBlacklist.addRuggedToken(rawAccount.mint.toString(), 'HIGH_LOSS', Math.abs(percentageChange));

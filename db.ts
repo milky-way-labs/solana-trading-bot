@@ -14,7 +14,10 @@ export class TokenEvent {
   symbol?: string;
 
   @Column()
-  timestamp: Date;
+  timestamp: Date; // data di creazione del record
+
+  @Column()
+  lastUpdated: Date; // ultima modifica del record
 
   @Column()
   eventType: string; // 'found', 'filtered', 'bought', 'sold'
@@ -36,6 +39,9 @@ export class TokenEvent {
 
   @Column()
   instanceId: string;
+
+  @Column({ type: 'array', nullable: true })
+  statusHistory?: string[]; // cronologia degli stati attraversati
 }
 
 let connection: Connection | null = null;
@@ -54,9 +60,9 @@ export async function initDB() {
   }
 }
 
-export async function logTokenEvent(
+export async function updateTokenStatus(
   tokenAddress: string,
-  eventType: 'found' | 'filtered' | 'bought' | 'sold',
+  newStatus: 'found' | 'filtered' | 'bought' | 'sold',
   options: {
     symbol?: string;
     reason?: string;
@@ -70,30 +76,53 @@ export async function logTokenEvent(
   if (!connection) await initDB();
 
   const repo = getMongoRepository(TokenEvent);
-  const event = new TokenEvent();
   
-  event.tokenAddress = tokenAddress;
-  event.symbol = options.symbol;
-  event.timestamp = new Date();
-  event.eventType = eventType;
-  event.reason = options.reason;
-  event.filterInfo = options.filterInfo;
-  event.gainLossPercentage = options.gainLossPercentage;
-  event.latencyMs = options.latencyMs;
-  event.poolOpenTimestamp = options.poolOpenTimestamp;
-  event.instanceId = INSTANCE_ID;
+  // Cerca record esistente per questo token e istanza
+  let event = await repo.findOne({ 
+    where: { 
+      tokenAddress: tokenAddress, 
+      instanceId: INSTANCE_ID 
+    } 
+  });
+
+  const now = new Date();
+
+  if (!event) {
+    // Crea nuovo record se non esiste
+    event = new TokenEvent();
+    event.tokenAddress = tokenAddress;
+    event.instanceId = INSTANCE_ID;
+    event.timestamp = now;
+    event.statusHistory = [newStatus];
+  } else {
+    // Aggiorna record esistente
+    if (!event.statusHistory) {
+      event.statusHistory = [event.eventType];
+    }
+    
+    // Aggiungi nuovo stato alla cronologia se diverso dall'ultimo
+    const lastStatus = event.statusHistory[event.statusHistory.length - 1];
+    if (lastStatus !== newStatus) {
+      event.statusHistory.push(newStatus);
+    }
+  }
+
+  // Aggiorna i campi
+  event.lastUpdated = now;
+  event.eventType = newStatus;
+  
+  // Aggiorna solo i campi forniti
+  if (options.symbol !== undefined) event.symbol = options.symbol;
+  if (options.reason !== undefined) event.reason = options.reason;
+  if (options.filterInfo !== undefined) event.filterInfo = options.filterInfo;
+  if (options.gainLossPercentage !== undefined) event.gainLossPercentage = options.gainLossPercentage;
+  if (options.latencyMs !== undefined) event.latencyMs = options.latencyMs;
+  if (options.poolOpenTimestamp !== undefined) event.poolOpenTimestamp = options.poolOpenTimestamp;
 
   await repo.save(event);
 }
 
-// Funzioni di compatibilità per non rompere il codice esistente
-export async function logFind(tokenAddress: string, poolOpenDateTime: Date): Promise<void> {
-  await logTokenEvent(tokenAddress, 'found', {
-    poolOpenTimestamp: poolOpenDateTime,
-    filterInfo: 'Token trovato e in fase di valutazione'
-  });
-}
-
+// Funzioni semplificate che utilizzano il nuovo sistema unificato
 export async function logTokenCandidate(
   tokenAddress: string,
   tokenSymbol: string | undefined,
@@ -107,7 +136,7 @@ export async function logTokenCandidate(
                    status === 'bought' ? 'bought' : 
                    status === 'sold' ? 'sold' : 'filtered';
   
-  await logTokenEvent(tokenAddress, eventType, {
+  await updateTokenStatus(tokenAddress, eventType, {
     symbol: tokenSymbol,
     reason,
     filterInfo,
@@ -116,16 +145,27 @@ export async function logTokenCandidate(
   });
 }
 
-export async function logBuy(tokenAddress: string, symbol?: string): Promise<void> {
-  await logTokenEvent(tokenAddress, 'bought', {
+export async function logSell(tokenAddress: string, gainLossPercentage: number, symbol?: string): Promise<void> {
+  await updateTokenStatus(tokenAddress, 'sold', {
+    gainLossPercentage,
     symbol,
-    filterInfo: 'Token acquistato con successo'
+    filterInfo: 'Token venduto'
   });
 }
 
-export async function logSell(tokenAddress: string, gainLossPercentage: number): Promise<void> {
-  await logTokenEvent(tokenAddress, 'sold', {
-    gainLossPercentage,
-    filterInfo: 'Token venduto'
+// Funzioni di compatibilità deprecate - da rimuovere in futuro
+export async function logFind(tokenAddress: string, poolOpenDateTime: Date): Promise<void> {
+  console.warn('logFind è deprecata, usa updateTokenStatus');
+  await updateTokenStatus(tokenAddress, 'found', {
+    poolOpenTimestamp: poolOpenDateTime,
+    filterInfo: 'Token trovato e in fase di valutazione'
+  });
+}
+
+export async function logBuy(tokenAddress: string, symbol?: string): Promise<void> {
+  console.warn('logBuy è deprecata, usa updateTokenStatus');
+  await updateTokenStatus(tokenAddress, 'bought', {
+    symbol,
+    filterInfo: 'Token acquistato con successo'
   });
 }
