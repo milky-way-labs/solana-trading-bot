@@ -1,20 +1,41 @@
 import {Telegraf} from "telegraf";
 import {InlineKeyboardMarkup, Message} from "telegraf/typings/core/types/typegram";
 import {BotConfig} from "./bot";
+import {logger} from "./helpers/logger";
 
 export class Messaging {
-    private readonly tg_bot: Telegraf;
+    private readonly tg_bot?: Telegraf;
 
     constructor(readonly config: BotConfig) {
 
         if (this.config.useTelegram) {
+            if (!this.config.telegramBotToken) {
+                throw new Error('TELEGRAM_BOT_TOKEN is required when USE_TELEGRAM is true');
+            }
+            if (!this.config.telegramChatId) {
+                throw new Error('TELEGRAM_CHAT_ID is required when USE_TELEGRAM is true');
+            }
+            
             this.tg_bot = new Telegraf(this.config.telegramBotToken);
             this.setupBot();
-            this.tg_bot.launch();
+            this.tg_bot.launch().catch((error) => {
+                if (error.message.includes('409') || error.message.includes('Conflict')) {
+                    logger.warn('⚠️ Telegram bot conflict detected - another instance might be running. Retrying in 10 seconds...');
+                    setTimeout(() => {
+                        this.tg_bot?.launch().catch((retryError) => {
+                            logger.error('Failed to restart Telegram bot after conflict:', retryError.message);
+                        });
+                    }, 10000);
+                } else {
+                    logger.error('Failed to launch Telegram bot:', error.message);
+                }
+            });
         }
     }
 
     private setupBot() {
+        if (!this.tg_bot) return;
+        
         this.tg_bot.on("message", async (ctx) => {
             if (!this.checkChatId(ctx)) {
                 return;
@@ -89,8 +110,8 @@ export class Messaging {
     }
 
     public async sendTelegramMessage(message: string, mint: string, messageId?: number): Promise<Message.TextMessage | undefined> {
-        if (!this.config.useTelegram) {
-            return null;
+        if (!this.config.useTelegram || !this.tg_bot) {
+            return undefined;
         }
 
         try {
@@ -107,7 +128,7 @@ export class Messaging {
             };
 
             if (messageId) {
-                this.tg_bot.telegram.editMessageText(this.config.telegramChatId, messageId, undefined, message, {
+                await this.tg_bot.telegram.editMessageText(this.config.telegramChatId, messageId, undefined, message, {
                     parse_mode: "HTML", reply_markup: kb
                 });
                 return undefined;
