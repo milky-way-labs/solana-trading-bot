@@ -70,6 +70,10 @@ export class AutoBlacklist {
     }
   }
 
+  public async isSymbolBlacklisted(symbol: string): Promise<boolean> {
+    return this.isAlreadyBlacklisted(symbol);
+  }
+
   private async isAlreadyBlacklisted(symbol: string): Promise<boolean> {
     try {
       if (!fs.existsSync(this.symbolBlacklistFile)) {
