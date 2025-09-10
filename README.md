@@ -254,6 +254,53 @@ The bot includes an intelligent auto-blacklist system that learns from rug pulls
 
 - `RSI_PERIOD` - default 14
 
+#### Pump.fun Integration
+
+The bot now supports pump.fun protocol for discovering and trading newly launched tokens on Solana's bonding curve platform.
+
+- `ENABLE_PUMP_FUN_LISTENER` - Set to `true` to enable pump.fun token monitoring (default: false)
+  - When enabled, the bot will listen for new token launches and bonding curve events
+- `PUMP_FUN_PROGRAM_ID` - pump.fun program ID (default: 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P)
+- `PUMP_FUN_MIGRATION_PROGRAM` - Migration program for bonding curve completion (default: 39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg)
+- `PUMP_FUN_MIN_MARKET_CAP` - Minimum market cap in USD to consider tokens (default: 0)
+- `PUMP_FUN_MAX_MARKET_CAP` - Maximum market cap in USD to consider tokens (default: 69000)
+  - Tokens above this will likely migrate to Raydium soon
+- `PUMP_FUN_BONDING_CURVE_THRESHOLD` - Maximum bonding curve progress % to buy (default: 85)
+  - Prevents buying tokens too close to migration
+
+**Key Features:**
+- **Real-time Monitoring**: Detects new token launches on pump.fun instantly
+- **Bonding Curve Analysis**: Calculates progress, market cap, and completion estimates
+- **Smart Filtering**: Avoids tokens too close to Raydium migration
+- **Unified Database**: Tracks pump.fun tokens alongside Raydium pools
+- **Cache System**: Efficient storage and retrieval of token data
+- **Risk Management**: Built-in filters for market cap, progress, and completion status
+
+**Usage Notes:**
+- pump.fun tokens use 6 decimal places (vs 9 for standard SPL tokens)
+- Bonding curve completes at ~$69K market cap, then migrates to Raydium
+- Set `ENABLE_PUMP_FUN_LISTENER=true` to activate (disabled by default)
+- Consider using lower `MAX_TOKENS_AT_THE_TIME` when both Raydium and pump.fun are active
+
+#### Discord Notifications
+
+Alternative to Telegram for easier setup and richer notifications.
+
+- `USE_DISCORD` - Set to `true` to enable Discord notifications (default: false)
+- `DISCORD_WEBHOOK_URL` - Discord webhook URL from your channel settings
+
+**Setup Discord (30 seconds):**
+1. Right-click your Discord channel → **Settings**
+2. **Integrations** → **Webhooks** → **Create Webhook**
+3. Copy the webhook URL
+4. Set `USE_DISCORD=true` and `DISCORD_WEBHOOK_URL=your_webhook_url`
+
+**Features:**
+- **Rich Embeds**: Colored notifications with formatted fields
+- **No Bot Setup**: Just a webhook URL, no complex bot creation
+- **Pump.fun Integration**: Special notifications for bonding curve trades
+- **Error Tracking**: Automatic error notifications with context
+
 ## Warp transactions (beta)
 
 In case you experience a lot of failed transactions or transaction performance is too slow, you can try using `warp` for executing transactions.
