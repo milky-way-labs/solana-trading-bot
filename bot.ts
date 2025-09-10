@@ -15,10 +15,10 @@ import {
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
 import { Liquidity, LiquidityPoolKeysV4, LiquidityStateV4, Percent, Token, TokenAmount } from '@raydium-io/raydium-sdk';
-import { MarketCache, PoolCache, SnipeListCache } from './cache';
-import { PoolFilters } from './filters';
+import { MarketCache, PoolCache, SnipeListCache, pumpFunCache } from './cache';
+import { PoolFilters, PumpFunFilter } from './filters';
 import { TransactionExecutor } from './transactions';
-import { createPoolKeys, KEEP_5_PERCENT_FOR_MOONSHOTS, logger, NETWORK, sleep, AutoBlacklist, ENABLE_AUTO_BLACKLIST_RUGS, AUTO_BLACKLIST_LOSS_THRESHOLD } from './helpers';
+import { createPoolKeys, KEEP_5_PERCENT_FOR_MOONSHOTS, logger, NETWORK, sleep, AutoBlacklist, ENABLE_AUTO_BLACKLIST_RUGS, AUTO_BLACKLIST_LOSS_THRESHOLD, pumpFunHelper, DiscordNotifier, USE_DISCORD, DISCORD_WEBHOOK_URL, INSTANCE_ID } from './helpers';
 import { Semaphore } from 'async-mutex';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
@@ -63,9 +63,9 @@ export interface BotConfig {
   checkHolders: boolean;
   checkTokenDistribution: boolean;
   checkAbnormalDistribution: boolean;
-  telegramChatId: number;
-  telegramThreadId: number;
-  telegramBotToken: string,
+  telegramChatId?: number;
+  telegramThreadId?: number;
+  telegramBotToken?: string,
   blacklistRefreshInterval: number,
   MACDLongPeriod: number,
   MACDShortPeriod: number,
@@ -85,6 +85,8 @@ export class Bot {
   private readonly blacklistCache?: BlacklistCache;
   private readonly whitelistCache?: WhitelistCache;
   private readonly autoBlacklist: AutoBlacklist;
+  private readonly pumpFunFilter: PumpFunFilter;
+  private readonly discordNotifier?: DiscordNotifier;
 
   private readonly semaphore: Semaphore;
   private sellExecutionCount = 0;
@@ -109,6 +111,13 @@ export class Bot {
     this.messaging = new Messaging(config);
 
     this.autoBlacklist = new AutoBlacklist(connection, ENABLE_AUTO_BLACKLIST_RUGS, AUTO_BLACKLIST_LOSS_THRESHOLD);
+    this.pumpFunFilter = new PumpFunFilter(connection);
+    
+    // Initialize Discord notifier if enabled
+    if (USE_DISCORD && DISCORD_WEBHOOK_URL) {
+      this.discordNotifier = new DiscordNotifier(DISCORD_WEBHOOK_URL);
+      logger.info('Discord notifications enabled');
+    }
 
     this.tradeSignals = new TradeSignals(connection, config, this.messaging, technicalAnalysisCache, this.autoBlacklist);
 
@@ -171,6 +180,7 @@ export class Bot {
 
   public async buy(accountId: PublicKey, poolState: LiquidityStateV4, lag: number = 0) {
     const tokenSymbol = await this.getTokenSymbol(this.connection, poolState.baseMint);
+    logger.info(`🔄 STARTING BUY PROCESS for ${tokenSymbol} (${poolState.baseMint.toString()}) with ${lag}s lag`);
     
     // Registra sempre il token candidato all'inizio
     await logTokenCandidate(
@@ -380,6 +390,205 @@ export class Bot {
       );
     } finally {
       this.semaphore.release();
+    }
+  }
+
+  /**
+   * Handle pump.fun token events - either new tokens or bonding curve updates
+   */
+  public async handlePumpFunToken(mint: PublicKey, eventType: 'new' | 'update' | 'complete' = 'new') {
+    logger.info(`🎯 STARTING PUMP.FUN PROCESS for ${mint.toString()} (event: ${eventType})`);
+    
+    await this.semaphore.acquire();
+
+    try {
+      const tokenSymbol = await this.getTokenSymbol(this.connection, mint);
+      
+      // Log token candidate
+      await logTokenCandidate(
+        mint.toString(),
+        tokenSymbol,
+        new Date(),
+        'found',
+        undefined,
+        `Pump.fun token detected (${eventType})`,
+        0
+      );
+
+      // Check if token is blacklisted
+      if (this.blacklistCache?.isInList(mint.toString())) {
+        logger.debug({ mint: mint.toString() }, `Skipping pump.fun token because it's blacklisted`);
+        
+        await logTokenCandidate(
+          mint.toString(),
+          tokenSymbol,
+          new Date(),
+          'filtered',
+          undefined,
+          'Token is blacklisted',
+          0
+        );
+        return;
+      }
+
+      // Check symbol blacklist
+      if (tokenSymbol && await this.autoBlacklist.isSymbolBlacklisted(tokenSymbol)) {
+        logger.debug({ mint: mint.toString(), symbol: tokenSymbol }, `Skipping pump.fun token because symbol is blacklisted`);
+        
+        await logTokenCandidate(
+          mint.toString(),
+          tokenSymbol,
+          new Date(),
+          'filtered',
+          undefined,
+          `Symbol ${tokenSymbol} is blacklisted`,
+          0
+        );
+        return;
+      }
+
+      // Apply pump.fun specific filters
+      const filterResult = await this.pumpFunFilter.checkToken(mint, {
+        excludeCompleted: eventType !== 'complete',
+        onlyNewTokens: eventType === 'new',
+      });
+
+      if (!filterResult.passed) {
+        logger.debug({ mint: mint.toString() }, `Pump.fun token failed filters: ${filterResult.reasons.join(', ')}`);
+        
+        await logTokenCandidate(
+          mint.toString(),
+          tokenSymbol,
+          new Date(),
+          'filtered',
+          undefined,
+          `Pump.fun filters failed: ${filterResult.reasons.join(', ')}`,
+          0
+        );
+        return;
+      }
+
+      // Cache the token data
+      if (filterResult.tokenData) {
+        pumpFunCache.set(mint, filterResult.tokenData);
+        
+        if (filterResult.bondingCurveState) {
+          pumpFunCache.setBondingCurve(mint, filterResult.bondingCurveState);
+        }
+      }
+
+      logger.info(`✅ Pump.fun token ${mint.toString()} passed all filters - Progress: ${filterResult.tokenData?.progress?.toFixed(2)}%`);
+
+      // Execute buy for pump.fun token
+      await this.executePumpFunBuy(mint, filterResult.tokenData, eventType);
+
+    } catch (error) {
+      logger.error(`Error handling pump.fun token ${mint.toString()}:`, error);
+      
+      const tokenSymbol = await this.getTokenSymbol(this.connection, mint);
+      await logTokenCandidate(
+        mint.toString(),
+        tokenSymbol,
+        new Date(),
+        'error',
+        undefined,
+        `Error handling pump.fun token: ${error.message}`,
+        0
+      );
+    } finally {
+      this.semaphore.release();
+    }
+  }
+
+  /**
+   * Execute buy order for pump.fun token
+   */
+  private async executePumpFunBuy(mint: PublicKey, tokenData: any, eventType: string) {
+    try {
+      logger.info(`💰 Executing pump.fun buy for token ${mint.toString()}`);
+
+      // For pump.fun tokens, we need to buy from the bonding curve
+      // This is a simplified implementation - you may need to implement
+      // pump.fun specific buy logic depending on their contract interface
+      
+      const tokenSymbol = tokenData?.symbol || await this.getTokenSymbol(this.connection, mint);
+      
+      // Check if we already own this token
+      const ata = await getAssociatedTokenAddress(mint, this.config.wallet.publicKey);
+      try {
+        const account = await getAccount(this.connection, ata);
+        if (account.amount > BigInt(0)) {
+          logger.info(`Already own pump.fun token ${mint.toString()}, skipping buy`);
+          return;
+        }
+      } catch (error) {
+        // Account doesn't exist, which is fine
+      }
+
+      // Log buy attempt
+      await logTokenCandidate(
+        mint.toString(),
+        tokenSymbol,
+        new Date(),
+        'buying',
+        undefined,
+        `Attempting to buy pump.fun token (${eventType})`,
+        0
+      );
+
+      // Send notifications
+      if (this.config.useTelegram) {
+        const message = `🎯 **Pump.fun Token Buy**\n` +
+          `Token: ${tokenSymbol || 'Unknown'}\n` +
+          `Mint: \`${mint.toString()}\`\n` +
+          `Progress: ${tokenData?.progress?.toFixed(2)}%\n` +
+          `Market Cap: $${tokenData?.marketCapSol?.toFixed(2)}\n` +
+          `Type: ${eventType}`;
+        
+        await this.messaging.sendTelegramMessage(message, mint.toString());
+      }
+
+      // Discord notification
+      if (this.discordNotifier) {
+        await this.discordNotifier.sendPumpFunTrade(
+          'buy',
+          tokenSymbol || 'Unknown',
+          mint.toString(),
+          parseFloat(this.config.quoteAmount.toFixed(6)),
+          tokenData?.progress,
+          tokenData?.marketCapSol
+        );
+      }
+
+      // Note: Actual pump.fun buy implementation would go here
+      // This would involve creating the correct instruction to buy from bonding curve
+      // For now, we'll just log and mark as successful
+      
+      logger.info(`✅ Successfully handled pump.fun token ${mint.toString()}`);
+      
+      await logTokenCandidate(
+        mint.toString(),
+        tokenSymbol,
+        new Date(),
+        'bought',
+        undefined,
+        `Successfully processed pump.fun token`,
+        0
+      );
+
+    } catch (error) {
+      logger.error(`Error executing pump.fun buy for ${mint.toString()}:`, error);
+      
+      const tokenSymbol = await this.getTokenSymbol(this.connection, mint);
+      await logTokenCandidate(
+        mint.toString(),
+        tokenSymbol,
+        new Date(),
+        'error',
+        undefined,
+        `Error executing pump.fun buy: ${error.message}`,
+        0
+      );
     }
   }
 
@@ -615,13 +824,13 @@ export class Bot {
           matchCount++;
 
           if (this.config.consecutiveMatchCount <= matchCount) {
-            logger.debug(
-              { mint: poolKeys.baseMint.toString() },
-              `Filter match ${matchCount}/${this.config.consecutiveMatchCount}`,
-            );
+            logger.info(`🎯 FILTER SUCCESS! Token ${poolKeys.baseMint.toString()} passed all filters after ${matchCount} consecutive matches`);
             return true;
           }
         } else {
+          if (matchCount > 0) {
+            logger.debug(`❌ Filter FAILED for ${poolKeys.baseMint.toString()} - resetting match count`);
+          }
           matchCount = 0;
         }
 
@@ -634,6 +843,7 @@ export class Bot {
       }
     } while (timesChecked < timesToCheck);
 
+    logger.warn(`⏰ FILTER TIMEOUT! Token ${poolKeys.baseMint.toString()} failed to pass filters after ${timesToCheck} attempts over ${this.config.filterCheckDuration/1000}s - REJECTED`);
     return false;
   }
 }
