@@ -1,6 +1,6 @@
 import { MarketCache, PoolCache } from './cache';
 import { Listeners } from './listeners';
-import { Connection, KeyedAccountInfo, Keypair } from '@solana/web3.js';
+import { Connection, KeyedAccountInfo, Keypair, PublicKey } from '@solana/web3.js';
 import { LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, Token, TokenAmount } from '@raydium-io/raydium-sdk';
 import { AccountLayout, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Bot, BotConfig } from './bot';
@@ -69,6 +69,8 @@ import {
   USE_SNIPE_LIST,
   USE_TA,
   USE_TELEGRAM,
+  ENABLE_PUMP_FUN_LISTENER,
+  PUMP_FUN_DETAILED_PARSING,
 } from './helpers';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
@@ -173,6 +175,116 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
   logger.info('Bot is running! Press CTRL + C to stop it.');
 }
 
+// Helper function to parse token information from pump.fun creation transaction (DETAILED VERSION)
+async function parseTokenFromTransactionDetailed(signature: string, connection: Connection) {
+  try {
+    // Add small delay to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    const tx = await connection.getTransaction(signature, { 
+      commitment: 'confirmed',
+      maxSupportedTransactionVersion: 0 
+    });
+    
+    if (!tx) {
+      logger.debug(`Could not fetch transaction: ${signature}`);
+      return null;
+    }
+
+    // Look for token creation patterns in logs
+    const logs = tx.meta?.logMessages || [];
+    let tokenName = 'Unknown';
+    let tokenSymbol = 'UNKNOWN';
+    let mintAddress = null;
+
+    // Parse logs for token information
+    for (const log of logs) {
+      // Look for mint creation
+      if (log.includes('Program log: Instruction: Create')) {
+        // Try to extract token info from logs (this might need adjustment based on actual pump.fun log format)
+        const nameMatch = log.match(/name:\s*"([^"]+)"/i);
+        const symbolMatch = log.match(/symbol:\s*"([^"]+)"/i);
+        
+        if (nameMatch) tokenName = nameMatch[1];
+        if (symbolMatch) tokenSymbol = symbolMatch[1];
+      }
+    }
+
+    // Extract mint address from token balances (most reliable method)
+    const postTokenBalances = tx.meta?.postTokenBalances || [];
+    if (postTokenBalances.length > 0) {
+      // Find the newly created token (usually has balance 0 initially or is the first one)
+      const newToken = postTokenBalances.find(balance => balance.uiTokenAmount?.decimals === 6); // pump.fun tokens are 6 decimals
+      if (newToken) {
+        mintAddress = newToken.mint;
+      } else {
+        // Fallback to first token balance
+        mintAddress = postTokenBalances[0]?.mint;
+      }
+    }
+
+    // Additional fallback: try to extract from account keys if we have a VersionedTransaction
+    if (!mintAddress) {
+      try {
+        const message = tx.transaction.message;
+        if ('accountKeys' in message) {
+          // Legacy transaction
+          const accountKeys = message.accountKeys;
+          if (accountKeys.length > 1) {
+            mintAddress = accountKeys[1]?.toBase58();
+          }
+        } else {
+          // Versioned transaction - we need to get loaded addresses
+          const accountKeys = message.getAccountKeys();
+          if (accountKeys.length > 1) {
+            mintAddress = accountKeys.get(1)?.toBase58();
+          }
+        }
+      } catch (e) {
+        logger.debug('Could not extract account keys from transaction');
+      }
+    }
+
+    return {
+      name: tokenName,
+      symbol: tokenSymbol,
+      mint: mintAddress,
+      signature,
+      isPlaceholder: false
+    };
+  } catch (error) {
+    logger.debug(`Error parsing token from transaction ${signature}:`, error);
+    return null;
+  }
+}
+
+// Helper function to parse token information from pump.fun creation transaction (OPTIMIZED VERSION)
+async function parseTokenFromTransactionOptimized(signature: string, connection: Connection) {
+  // Fast version: no RPC calls, just generate a placeholder mint from signature hash
+  // This avoids rate limiting but doesn't give real token info
+  
+  // Generate a deterministic "mint" address from signature for display purposes
+  // Note: This is NOT the real mint address, just for logging
+  const hash = signature.substring(0, 44); // Take first 44 chars as pseudo-mint
+  
+  return {
+    name: 'Pump.fun Token',
+    symbol: 'PUMP',
+    mint: hash, // This is NOT the real mint, just a placeholder
+    signature,
+    isPlaceholder: true
+  };
+}
+
+// Main parser function that chooses based on configuration
+async function parseTokenFromTransaction(signature: string, connection: Connection) {
+  if (PUMP_FUN_DETAILED_PARSING) {
+    return await parseTokenFromTransactionDetailed(signature, connection);
+  } else {
+    return await parseTokenFromTransactionOptimized(signature, connection);
+  }
+}
+
 const runListener = async () => {
   logger.level = LOG_LEVEL;
   logger.info('Bot is starting...');
@@ -232,9 +344,9 @@ const runListener = async () => {
     checkHolders: CHECK_HOLDERS,
     checkTokenDistribution: CHECK_TOKEN_DISTRIBUTION,
     checkAbnormalDistribution: CHECK_ABNORMAL_DISTRIBUTION,
-    telegramChatId: TELEGRAM_CHAT_ID,
-    telegramThreadId: TELEGRAM_THREAD_ID,
-    telegramBotToken: TELEGRAM_BOT_TOKEN,
+    telegramChatId: USE_TELEGRAM ? TELEGRAM_CHAT_ID : undefined,
+    telegramThreadId: USE_TELEGRAM ? TELEGRAM_THREAD_ID : undefined,
+    telegramBotToken: USE_TELEGRAM ? TELEGRAM_BOT_TOKEN : undefined,
     blacklistRefreshInterval: BLACKLIST_REFRESH_INTERVAL,
     MACDLongPeriod: MACD_LONG_PERIOD,
     MACDShortPeriod: MACD_SHORT_PERIOD,
@@ -279,23 +391,32 @@ const runListener = async () => {
     const poolState = LIQUIDITY_STATE_LAYOUT_V4.decode(updatedAccountInfo.accountInfo.data);
     const poolOpenTime = parseInt(poolState.poolOpenTime.toString());
     const exists = await poolCache.get(poolState.baseMint.toString());
+    const baseMint = poolState.baseMint.toString();
+    const quoteMint = poolState.quoteMint.toString();
 
     let currentTimestamp = Math.floor(new Date().getTime() / 1000);
     let lag = currentTimestamp - poolOpenTime;
-
-    if (!exists && poolOpenTime > runTimestamp) {
-      poolCache.save(updatedAccountInfo.accountId.toString(), poolState);
-
-      await logFind(poolState.baseMint.toString(), new Date(poolOpenTime * 1000));
-
-      if (MAX_LAG != 0 && lag > MAX_LAG) {
-        logger.trace(`Lag too high: ${lag} sec`);
-        return;
-      } else {
-        logger.trace(`Lag: ${lag} sec`);
-        await bot.buy(updatedAccountInfo.accountId, poolState, lag);
-      }
+    
+    if (exists) {
+      return;
     }
+
+    if (poolOpenTime <= runTimestamp) {
+      return;
+    }
+
+    logger.info(`🟢 NEW POOL FOUND! Base: ${baseMint}, Lag: ${lag}s`);
+    tokenFoundCount++;
+    poolCache.save(updatedAccountInfo.accountId.toString(), poolState);
+    await logFind(poolState.baseMint.toString(), new Date(poolOpenTime * 1000));
+
+    if (MAX_LAG != 0 && lag > MAX_LAG) {
+      logger.warn(`⚠️ Lag too high for ${baseMint}: ${lag}s (max: ${MAX_LAG}s) - SKIPPING`);
+      return;
+    }
+
+    logger.info(`🚀 Processing new token: ${baseMint} (lag: ${lag}s)`);
+    await bot.buy(updatedAccountInfo.accountId, poolState, lag);
   });
 
   listeners.on('wallet', async (updatedAccountInfo: KeyedAccountInfo) => {
@@ -308,7 +429,116 @@ const runListener = async () => {
     await bot.sell(updatedAccountInfo.accountId, accountData);
   });
 
+  // Pump.fun event listeners
+  if (ENABLE_PUMP_FUN_LISTENER) {
+    const parsingMode = PUMP_FUN_DETAILED_PARSING ? 'DETAILED' : 'OPTIMIZED';
+    logger.info(`🎯 Pump.fun listeners enabled (${parsingMode} parsing mode)`);
+
+    listeners.on('pumpFun', async (data: any) => {
+      try {
+        // Handle generic pump.fun transaction logs
+      } catch (error) {
+        logger.error('Error handling pump.fun transaction:', error);
+      }
+    });
+
+    listeners.on('pumpFunBondingCurve', async (data: any) => {
+      try {
+        logger.info(`🎯 Pump.fun bonding curve update: ${data.bondingCurve.toString()}`);
+        
+        // Extract mint from bonding curve (you may need to implement this based on pump.fun structure)
+        // For now, we'll use a placeholder approach
+        const mint = data.bondingCurve; // This needs proper implementation
+        
+        logger.info(`🚀 Processing pump.fun token update: ${mint.toString()}`);
+        await bot.handlePumpFunToken(mint, 'update');
+      } catch (error) {
+        logger.error('Error handling pump.fun bonding curve:', error);
+      }
+    });
+
+    listeners.on('pumpFunCreate', async (createEvent: any) => {
+      try {
+        tokenFoundCount++;
+        
+        // Parse token information from transaction
+        const tokenInfo = await parseTokenFromTransaction(createEvent.signature, connection);
+        
+        if (tokenInfo) {
+          if (tokenInfo.isPlaceholder) {
+            // Optimized mode - no real mint address
+            const shortSig = createEvent.signature.substring(0, 8) + '...' + createEvent.signature.substring(-8);
+            logger.info(`🎯 NEW PUMP.FUN TOKEN: "${tokenInfo.name}" (${tokenInfo.symbol}) | tx: ${shortSig} [OPTIMIZED MODE]`);
+          } else {
+            // Detailed mode - real mint address
+            logger.info(`🎯 NEW PUMP.FUN TOKEN: "${tokenInfo.name}" (${tokenInfo.symbol}) | ${tokenInfo.mint} | tx: ${createEvent.signature}`);
+            
+            // Process the token if we have the real mint address
+            if (tokenInfo.mint) {
+              await bot.handlePumpFunToken(new PublicKey(tokenInfo.mint), 'new');
+            }
+          }
+        } else {
+          // Fallback if parsing fails - show truncated signature
+          const shortSig = createEvent.signature.substring(0, 8) + '...' + createEvent.signature.substring(-8);
+          logger.info(`🎯 NEW PUMP.FUN TOKEN | Unknown Token | tx: ${shortSig}`);
+        }
+      } catch (error) {
+        logger.error('Error handling pump.fun create event:', error);
+      }
+    });
+
+    listeners.on('pumpFunTrade', async (tradeEvent: any) => {
+      try {
+        
+        // TODO: Extract mint from transaction logs if needed for trading updates
+      } catch (error) {
+        logger.error('Error handling pump.fun trade event:', error);
+      }
+    });
+
+    listeners.on('pumpFunComplete', async (completeEvent: any) => {
+      try {
+        logger.info(`🎯 Pump.fun bonding curve completed in tx: ${completeEvent.signature}`);
+        
+        // TODO: Extract mint from transaction logs for completion handling
+      } catch (error) {
+        logger.error('Error handling pump.fun complete event:', error);
+      }
+    });
+
+    listeners.on('pumpFunMigration', async (updatedAccountInfo: KeyedAccountInfo) => {
+      try {
+        logger.info(`Pump.fun migration detected: ${updatedAccountInfo.accountId.toString()}`);
+        // Handle migration from bonding curve to Raydium
+        // This could trigger final buy opportunities or sell signals
+      } catch (error) {
+        logger.error('Error handling pump.fun migration:', error);
+      }
+    });
+  }
+
   printDetails(wallet, quoteToken, bot);
+
+  // Periodic status log to show the bot is active
+  let tokenFoundCount = 0;
+  let poolEventsCount = 0;
+  let pumpFunEventsCount = 0;
+
+  // Count events
+  listeners.on('pool', () => { poolEventsCount++; });
+  listeners.on('pumpFun', () => { pumpFunEventsCount++; });
+
+  setInterval(() => {
+    const uptimeMinutes = Math.floor(process.uptime() / 60);
+    logger.info(`📊 STATUS: ${uptimeMinutes}m uptime | ${listeners.getActiveListenerCount()} listeners active | Pools: ${poolEventsCount} | PumpFun: ${pumpFunEventsCount} | New tokens: ${tokenFoundCount}`);
+    
+    // Reset counters every hour
+    if (uptimeMinutes % 60 === 0) {
+      poolEventsCount = 0;
+      pumpFunEventsCount = 0;
+    }
+  }, 600000); // Every 10 minutes
 };
 
 runListener();
