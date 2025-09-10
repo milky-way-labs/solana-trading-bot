@@ -5,3 +5,4 @@ export * from './pool-size.filter';
 export * from './renounced.filter';
 export * from './blacklist.filter';
 export * from './symbol-blacklist.filter';
+export * from './pump-fun.filter';

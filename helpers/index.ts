@@ -6,3 +6,5 @@ export * from './token';
 export * from './wallet';
 export * from './promises';
 export * from './auto-blacklist';
+export * from './pump-fun';
+export * from './discord-notifier';

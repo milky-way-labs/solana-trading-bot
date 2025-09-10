@@ -36,6 +36,17 @@ export const CUSTOM_FEE = retrieveEnvVariable('CUSTOM_FEE', logger);
 export const MAX_LAG = Number(retrieveEnvVariable('MAX_LAG', logger));
 export const USE_TA = retrieveEnvVariable('USE_TA', logger) === 'true';
 export const USE_TELEGRAM = retrieveEnvVariable('USE_TELEGRAM', logger) === 'true';
+export const USE_DISCORD = retrieveEnvVariable('USE_DISCORD', logger, false) === 'true';
+export const DISCORD_WEBHOOK_URL = retrieveEnvVariable('DISCORD_WEBHOOK_URL', logger, false);
+
+// Pump.fun
+export const PUMP_FUN_PROGRAM_ID = retrieveEnvVariable('PUMP_FUN_PROGRAM_ID', logger, false) || '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P';
+export const PUMP_FUN_MIGRATION_PROGRAM = retrieveEnvVariable('PUMP_FUN_MIGRATION_PROGRAM', logger, false) || '39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg';
+export const ENABLE_PUMP_FUN_LISTENER = retrieveEnvVariable('ENABLE_PUMP_FUN_LISTENER', logger, false) === 'true';
+export const PUMP_FUN_MIN_MARKET_CAP = Number(retrieveEnvVariable('PUMP_FUN_MIN_MARKET_CAP', logger, false) || 0);
+export const PUMP_FUN_MAX_MARKET_CAP = Number(retrieveEnvVariable('PUMP_FUN_MAX_MARKET_CAP', logger, false) || 69000);
+export const PUMP_FUN_BONDING_CURVE_THRESHOLD = Number(retrieveEnvVariable('PUMP_FUN_BONDING_CURVE_THRESHOLD', logger, false) || 85);
+export const PUMP_FUN_DETAILED_PARSING = retrieveEnvVariable('PUMP_FUN_DETAILED_PARSING', logger, false) === 'true';
 
 // Buy
 export const AUTO_BUY_DELAY = Number(retrieveEnvVariable('AUTO_BUY_DELAY', logger));
@@ -97,9 +108,9 @@ export const TOP_10_MAX_PERCENTAGE = Number (retrieveEnvVariable('TOP_10_MAX_PER
 export const HOLDER_MIN_AMOUNT = Number (retrieveEnvVariable('HOLDER_MIN_AMOUNT', logger));
 
 //Telegram config
-export const TELEGRAM_BOT_TOKEN = retrieveEnvVariable('TELEGRAM_BOT_TOKEN', logger);
-export const TELEGRAM_CHAT_ID = Number (retrieveEnvVariable('TELEGRAM_CHAT_ID', logger));
-export const TELEGRAM_THREAD_ID = Number (retrieveEnvVariable('TELEGRAM_THREAD_ID', logger));
+export const TELEGRAM_BOT_TOKEN = retrieveEnvVariable('TELEGRAM_BOT_TOKEN', logger, false);
+export const TELEGRAM_CHAT_ID = Number(retrieveEnvVariable('TELEGRAM_CHAT_ID', logger, false) || 0);
+export const TELEGRAM_THREAD_ID = Number(retrieveEnvVariable('TELEGRAM_THREAD_ID', logger, false) || 0);
 
 //Technical analysis
 export const MACD_SHORT_PERIOD = Number (retrieveEnvVariable('MACD_SHORT_PERIOD', logger));
