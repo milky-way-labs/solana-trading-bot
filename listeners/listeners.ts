@@ -140,42 +140,47 @@ export class Listeners extends EventEmitter {
       pumpFunProgramId,
       async (logs, ctx) => {
         try {
-          
-          // Emit pump.fun event for any transaction
-          this.emit('pumpFun', { logs, ctx });
-          
-          // Look for specific log patterns that indicate token creation
-          const createPattern = /Program log: Instruction: Create/;
-          const tradePattern = /Program log: Instruction: (Buy|Sell)/;
-          const completePattern = /Program log: Instruction: Complete/;
-          
-          for (const log of logs.logs) {
-            if (createPattern.test(log)) {
-              this.emit('pumpFunCreate', { 
-                signature: logs.signature,
-                logs: logs.logs,
-                ctx 
-              });
-              break;
-            } else if (tradePattern.test(log)) {
-              const isBuy = log.includes('Buy');
-              this.emit('pumpFunTrade', { 
-                signature: logs.signature,
-                isBuy,
-                logs: logs.logs,
-                ctx 
-              });
-              break;
-            } else if (completePattern.test(log)) {
-              logger.info(`🎯 PUMP.FUN BONDING CURVE COMPLETED in tx: ${logs.signature}`);
-              this.emit('pumpFunComplete', { 
-                signature: logs.signature,
-                logs: logs.logs,
-                ctx 
-              });
-              break;
-            }
+          // Fast priority check for create transactions
+          const hasCreateLog = logs.logs.some(log => log.includes('Program log: Instruction: Create'));
+          if (hasCreateLog) {
+            // Immediately emit create event with minimal processing
+            this.emit('pumpFunCreate', { 
+              signature: logs.signature,
+              logs: logs.logs,
+              ctx,
+              slot: ctx.slot,
+              timestamp: Date.now() // Add current timestamp for freshness check
+            });
+            return; // Skip other checks for create events to maximize speed
           }
+          
+          // Check for other events only if not a create event
+          const hasTradeLog = logs.logs.some(log => 
+            log.includes('Program log: Instruction: Buy') || 
+            log.includes('Program log: Instruction: Sell')
+          );
+          
+          if (hasTradeLog) {
+            const isBuy = logs.logs.some(log => log.includes('Buy'));
+            this.emit('pumpFunTrade', { 
+              signature: logs.signature,
+              isBuy,
+              logs: logs.logs,
+              ctx 
+            });
+            return;
+          }
+          
+          const hasCompleteLog = logs.logs.some(log => log.includes('Program log: Instruction: Complete'));
+          if (hasCompleteLog) {
+            logger.info(`🎯 PUMP.FUN BONDING CURVE COMPLETED in tx: ${logs.signature}`);
+            this.emit('pumpFunComplete', { 
+              signature: logs.signature,
+              logs: logs.logs,
+              ctx 
+            });
+          }
+          
         } catch (error) {
           logger.error('Error processing pump.fun logs:', error);
         }

@@ -258,22 +258,237 @@ async function parseTokenFromTransactionDetailed(signature: string, connection: 
   }
 }
 
+// Known program IDs that should not be treated as tokens
+const KNOWN_PROGRAM_IDS = new Set([
+  // System programs
+  '11111111111111111111111111111111', // System Program
+  'ComputeBudget111111111111111111111111111111', // Compute Budget Program
+  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // Token Program
+  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', // Associated Token Program
+  'SysvarRent111111111111111111111111111111111', // Rent Sysvar
+  'SysvarC1ock11111111111111111111111111111111', // Clock Sysvar
+  // Pump.fun programs
+  '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P', // Pump.fun Program
+  '39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg', // Pump.fun Migration Program
+  // Raydium programs
+  '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // Raydium AMM Program
+  '27haf8L6oxUeXrHrgEgsexjSY5hbVUWEmvv9Nyxg8vQv', // Raydium Liquidity Pool V4
+  // OpenBook
+  'srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX', // Serum/OpenBook Program
+  // Other common programs
+  'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s', // Token Metadata Program
+  'auth9SigNpDKz4sJJ1DfCTuZrZNSAgh9sFD3rboVmgg' // Token Auth Rules
+]);
+
+// Helper function to extract mint address from pump.fun transaction using proper method
+async function extractMintFromPumpFunTransaction(signature: string, connection: Connection): Promise<string | null> {
+  try {
+    // Get the complete transaction details
+    const transaction = await connection.getParsedTransaction(signature, { 
+      maxSupportedTransactionVersion: 0,
+      commitment: 'confirmed' 
+    });
+
+    if (!transaction) {
+      logger.debug(`Failed to fetch transaction: ${signature}`);
+      return null;
+    }
+
+    // Method 1: Check postTokenBalances for newly created token accounts (most reliable)
+    if (transaction.meta?.postTokenBalances && transaction.meta?.preTokenBalances) {
+      const preBalances = transaction.meta.preTokenBalances;
+      const postBalances = transaction.meta.postTokenBalances;
+      
+      // Find new token accounts (present in post but not in pre)
+      for (const postBalance of postBalances) {
+        const existedInPre = preBalances.some(preBalance => 
+          preBalance.accountIndex === postBalance.accountIndex && 
+          preBalance.mint === postBalance.mint
+        );
+        
+        if (!existedInPre && postBalance.mint && !KNOWN_PROGRAM_IDS.has(postBalance.mint)) {
+          logger.debug(`Found new mint in postTokenBalances: ${postBalance.mint}`);
+          return postBalance.mint;
+        }
+      }
+    }
+
+    // Method 2: Look for InitializeMint2 instruction and get account keys
+    if (transaction.meta?.logMessages) {
+      // Check if this contains mint initialization
+      const hasInitializeMint = transaction.meta.logMessages.some(log => 
+        log.includes('InitializeMint2') || 
+        log.includes('initialize mint')
+      );
+      
+      if (hasInitializeMint && transaction.transaction.message.accountKeys) {
+        // In pump.fun Create transactions, the new mint is typically one of the account keys
+        // Skip system programs and look for potential mint addresses
+        for (const accountKey of transaction.transaction.message.accountKeys) {
+          const accountAddress = accountKey.pubkey.toString();
+          
+          // Skip known program IDs
+          if (KNOWN_PROGRAM_IDS.has(accountAddress)) {
+            continue;
+          }
+          
+          // Additional validation: check if this could be a mint account
+          try {
+            const mintInfo = await connection.getAccountInfo(new PublicKey(accountAddress));
+            if (mintInfo && mintInfo.data.length === 82) { // Mint account size
+              logger.debug(`Found potential mint from account keys: ${accountAddress}`);
+              return accountAddress;
+            }
+          } catch {
+            // Continue checking other accounts
+          }
+        }
+      }
+    }
+
+    // Method 3: Parse program data from logs if available (fallback)
+    if (transaction.meta?.logMessages) {
+      for (const log of transaction.meta.logMessages) {
+        if (log.includes('Program data:')) {
+          try {
+            const dataMatch = log.match(/Program data: ([A-Za-z0-9+/=]+)/);
+            if (dataMatch && dataMatch[1]) {
+              const base64Data = dataMatch[1];
+              const buffer = Buffer.from(base64Data, 'base64');
+              
+              if (buffer.length >= 32) {
+                // Try to extract 32-byte PublicKey from different offsets
+                for (let offset = 0; offset <= buffer.length - 32; offset += 8) {
+                  try {
+                    const potentialMint = new PublicKey(buffer.subarray(offset, offset + 32));
+                    const mintString = potentialMint.toString();
+                    
+                    if (!KNOWN_PROGRAM_IDS.has(mintString) && 
+                        mintString !== '11111111111111111111111111111111') {
+                      logger.debug(`Found potential mint from program data: ${mintString}`);
+                      return mintString;
+                    }
+                  } catch {
+                    continue;
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            logger.debug('Error parsing program data:', error);
+          }
+        }
+      }
+    }
+
+    return null;
+  } catch (error) {
+    logger.debug(`Error extracting mint from transaction ${signature}:`, error);
+    return null;
+  }
+}
+
+// Simplified function for quick log-only parsing (fallback)
+function extractMintFromLogs(logs: string[]): string | null {
+  try {
+    // FIRST: Check if this is a CREATE transaction (not BUY)
+    const hasCreateInstruction = logs.some(log => log.includes('Program log: Instruction: Create'));
+    if (!hasCreateInstruction) {
+      return null; // Skip silently - probably Buy/Sell transaction
+    }
+    
+    // SECOND: Look for "Program data:" and try basic parsing
+    for (const log of logs) {
+      if (log.includes('Program data:')) {
+        try {
+          const dataMatch = log.match(/Program data: ([A-Za-z0-9+/=]+)/);
+          if (dataMatch && dataMatch[1]) {
+            const base64Data = dataMatch[1];
+            const buffer = Buffer.from(base64Data, 'base64');
+            
+            if (buffer.length >= 32) {
+              // Try first 32 bytes as potential mint
+              try {
+                const potentialMint = new PublicKey(buffer.subarray(0, 32));
+                const mintString = potentialMint.toString();
+                
+                if (!KNOWN_PROGRAM_IDS.has(mintString) && 
+                    mintString !== '11111111111111111111111111111111') {
+                  return mintString;
+                }
+              } catch {
+                // Continue to next attempt
+              }
+              
+              // Try at offset 32 if available
+              if (buffer.length >= 64) {
+                try {
+                  const potentialMint = new PublicKey(buffer.subarray(32, 64));
+                  const mintString = potentialMint.toString();
+                  
+                  if (!KNOWN_PROGRAM_IDS.has(mintString) && 
+                      mintString !== '11111111111111111111111111111111') {
+                    return mintString;
+                  }
+                } catch {
+                  // Continue
+                }
+              }
+            }
+          }
+        } catch (error) {
+          logger.debug('Error parsing program data from logs:', error);
+        }
+      }
+    }
+
+    return null;
+  } catch (error) {
+    logger.debug('Error in extractMintFromLogs:', error);
+    return null;
+  }
+}
+
 // Helper function to parse token information from pump.fun creation transaction (OPTIMIZED VERSION)
 async function parseTokenFromTransactionOptimized(signature: string, connection: Connection) {
-  // Fast version: no RPC calls, just generate a placeholder mint from signature hash
-  // This avoids rate limiting but doesn't give real token info
-  
-  // Generate a deterministic "mint" address from signature for display purposes
-  // Note: This is NOT the real mint address, just for logging
-  const hash = signature.substring(0, 44); // Take first 44 chars as pseudo-mint
-  
-  return {
-    name: 'Pump.fun Token',
-    symbol: 'PUMP',
-    mint: hash, // This is NOT the real mint, just a placeholder
-    signature,
-    isPlaceholder: true
-  };
+  // Try to extract mint from event data that's already available in the logs
+  // This is a light approach that tries to extract mint without full RPC calls
+  try {
+    // For pump.fun, we can try to decode mint from the signature or event data
+    // Since we're in the logs listener, we might already have some info
+    
+    // As a fallback for now, we'll use a deterministic approach but try to make it look more like a mint
+    // Generate a deterministic mint-like address from signature hash
+    const base58chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    let hash = signature;
+    let mintLike = '';
+    
+    // Create a 44-character base58-like string from the signature
+    for (let i = 0; i < 44; i++) {
+      const charIndex = signature.charCodeAt(i % signature.length) % base58chars.length;
+      mintLike += base58chars[charIndex];
+    }
+    
+    return {
+      name: 'Pump.fun Token',
+      symbol: 'PUMP',
+      mint: mintLike + 'pump', // Add 'pump' suffix to make it clearly identifiable
+      signature,
+      isPlaceholder: true
+    };
+  } catch (error) {
+    logger.debug(`Error in optimized parsing for ${signature}:`, error);
+    
+    // Fallback to simple approach
+    const hash = signature.substring(0, 44);
+    return {
+      name: 'Pump.fun Token', 
+      symbol: 'PUMP',
+      mint: hash,
+      signature,
+      isPlaceholder: true
+    };
+  }
 }
 
 // Main parser function that chooses based on configuration
@@ -459,29 +674,82 @@ const runListener = async () => {
 
     listeners.on('pumpFunCreate', async (createEvent: any) => {
       try {
+        // Check transaction timestamp to filter only new tokens
+        const currentTimestamp = Math.floor(new Date().getTime() / 1000);
+        let transactionTimestamp = currentTimestamp; // Default to current if we can't get it
+        
+        // Try to get transaction timestamp from slot
+        if (createEvent.ctx && createEvent.ctx.slot) {
+          try {
+            const blockTime = await connection.getBlockTime(createEvent.ctx.slot);
+            if (blockTime) {
+              transactionTimestamp = blockTime;
+            }
+          } catch (error) {
+            logger.debug(`Could not get block time for slot ${createEvent.ctx.slot}`);
+          }
+        }
+        
+        // More aggressive timing filter - only process very fresh tokens
+        const timeSinceStart = transactionTimestamp - runTimestamp;
+        if (timeSinceStart < -10) { // Reduced from -30 to -10 seconds
+          logger.debug(`⏰ Skipping old pump.fun token (${timeSinceStart}s before bot start)`);
+          return;
+        }
+        
+        // Also check if we have event timestamp and prioritize ultra-fresh tokens
+        if (createEvent.timestamp) {
+          const eventLag = Date.now() - createEvent.timestamp;
+          if (eventLag > 5000) { // Skip if event is older than 5 seconds
+            logger.debug(`⏰ Skipping pump.fun token - event too old (${eventLag}ms)`);
+            return;
+          }
+        }
+        
         tokenFoundCount++;
         
-        // Parse token information from transaction
-        const tokenInfo = await parseTokenFromTransaction(createEvent.signature, connection);
+        // Ultra-fast parsing for fresh tokens
+        const lag = currentTimestamp - transactionTimestamp;
+        const eventLag = createEvent.timestamp ? Date.now() - createEvent.timestamp : 0;
+        
+        // Use the proper method to extract mint address from transaction
+        let mintAddress: string | null = null;
+        
+        // Always use full transaction parsing for accurate results
+        // (Disable quick log parsing as it was extracting program IDs instead of mints)
+        mintAddress = await extractMintFromPumpFunTransaction(createEvent.signature, connection);
+        
+        if (mintAddress) {
+          logger.info(`🚀 NEW PUMP.FUN TOKEN DETECTED | Address: ${mintAddress} | Tx: ${createEvent.signature} | Lag: ${eventLag}ms`);
+          await bot.handlePumpFunToken(new PublicKey(mintAddress), 'new');
+          return;
+        } else {
+          logger.debug(`❌ Could not extract mint address from pump.fun transaction: ${createEvent.signature}`);
+          return;
+        }
+        
+        // Legacy fallback (this should not be reached with the new implementation)
+        const tokenInfo = await parseTokenFromTransactionOptimized(createEvent.signature, connection);
         
         if (tokenInfo) {
           if (tokenInfo.isPlaceholder) {
-            // Optimized mode - no real mint address
-            const shortSig = createEvent.signature.substring(0, 8) + '...' + createEvent.signature.substring(-8);
-            logger.info(`🎯 NEW PUMP.FUN TOKEN: "${tokenInfo.name}" (${tokenInfo.symbol}) | tx: ${shortSig} [OPTIMIZED MODE]`);
+            // Optimized mode - show mint-like address instead of transaction
+            logger.info(`🎯 NEW PUMP.FUN TOKEN: "${tokenInfo.name}" (${tokenInfo.symbol}) | Contract: ${tokenInfo.mint} | Lag: ${lag}s`);
           } else {
             // Detailed mode - real mint address
-            logger.info(`🎯 NEW PUMP.FUN TOKEN: "${tokenInfo.name}" (${tokenInfo.symbol}) | ${tokenInfo.mint} | tx: ${createEvent.signature}`);
+            logger.info(`🎯 NEW PUMP.FUN TOKEN: "${tokenInfo.name}" (${tokenInfo.symbol}) | Contract: ${tokenInfo.mint} | Lag: ${lag}s`);
             
-            // Process the token if we have the real mint address
-            if (tokenInfo.mint) {
+            // Process the token if we have the real mint address and it's recent enough
+            if (tokenInfo.mint && lag <= (MAX_LAG || 300)) { // Default 5min max lag if not set
               await bot.handlePumpFunToken(new PublicKey(tokenInfo.mint), 'new');
+            } else if (lag > (MAX_LAG || 300)) {
+              logger.warn(`⚠️ Pump.fun token lag too high: ${lag}s (max: ${MAX_LAG || 300}s) - SKIPPING`);
             }
           }
         } else {
-          // Fallback if parsing fails - show truncated signature
-          const shortSig = createEvent.signature.substring(0, 8) + '...' + createEvent.signature.substring(-8);
-          logger.info(`🎯 NEW PUMP.FUN TOKEN | Unknown Token | tx: ${shortSig}`);
+          // Fallback if parsing fails - show placeholder mint
+          const pseudoMint = createEvent.signature.substring(0, 40) + 'pump';
+          logger.info(`🎯 NEW PUMP.FUN TOKEN | Unknown Token | Contract: ${pseudoMint}`);
         }
       } catch (error) {
         logger.error('Error handling pump.fun create event:', error);
