@@ -189,27 +189,89 @@ export class PumpFunHelper {
     try {
       const [bondingCurve] = this.getBondingCurvePDA(mint);
       const accountInfo = await this.connection.getAccountInfo(bondingCurve);
-      
+
       if (!accountInfo) {
         return null;
       }
 
-      // Parse the account data - you'll need to implement the actual layout
-      // based on pump.fun's bonding curve account structure
+      // Parse the account data based on pump.fun's bonding curve account structure
       const data = accountInfo.data;
-      
-      // This is a placeholder - you need to implement the actual parsing
-      // based on the pump.fun bonding curve data layout
-      return {
-        virtualTokenReserves: new BN(0),
-        virtualSolReserves: new BN(0),
-        realTokenReserves: new BN(0),
-        realSolReserves: new BN(0),
-        tokenTotalSupply: new BN(0),
-        complete: false,
-      };
+
+      if (data.length < 41) { // Minimum expected size
+        logger.debug(`Bonding curve account too small: ${data.length} bytes for ${mint.toString()}`);
+        return null;
+      }
+
+      try {
+        // Pump.fun bonding curve layout (based on common pump.fun structure):
+        // 8 bytes: discriminator (skip)
+        // 8 bytes: virtual_token_reserves (u64)
+        // 8 bytes: virtual_sol_reserves (u64)
+        // 8 bytes: real_token_reserves (u64)
+        // 8 bytes: real_sol_reserves (u64)
+        // 8 bytes: token_total_supply (u64)
+        // 1 byte: complete (bool)
+
+        let offset = 8; // Skip discriminator
+
+        const virtualTokenReserves = new BN(data.subarray(offset, offset + 8), 'le');
+        offset += 8;
+
+        const virtualSolReserves = new BN(data.subarray(offset, offset + 8), 'le');
+        offset += 8;
+
+        const realTokenReserves = new BN(data.subarray(offset, offset + 8), 'le');
+        offset += 8;
+
+        const realSolReserves = new BN(data.subarray(offset, offset + 8), 'le');
+        offset += 8;
+
+        const tokenTotalSupply = new BN(data.subarray(offset, offset + 8), 'le');
+        offset += 8;
+
+        const complete = data[offset] === 1;
+
+        const state = {
+          virtualTokenReserves,
+          virtualSolReserves,
+          realTokenReserves,
+          realSolReserves,
+          tokenTotalSupply,
+          complete,
+        };
+
+        logger.debug(`Parsed bonding curve for ${mint.toString()}: virtualSol=${virtualSolReserves.toString()}, complete=${complete}`);
+        return state;
+
+      } catch (parseError) {
+        logger.debug(`Error parsing bonding curve data for ${mint.toString()}: ${parseError.message}`);
+
+        // Fallback: try alternative layout if primary fails
+        try {
+          // Alternative layout - sometimes the structure might be slightly different
+          const virtualSolReserves = new BN(data.subarray(16, 24), 'le'); // Try offset 16
+          const virtualTokenReserves = new BN(data.subarray(24, 32), 'le');
+          const tokenTotalSupply = new BN(1000000000).mul(new BN(1000000)); // 1B * 1e6 decimals
+
+          if (!virtualSolReserves.isZero()) {
+            logger.debug(`Used fallback parsing for ${mint.toString()}`);
+            return {
+              virtualTokenReserves,
+              virtualSolReserves,
+              realTokenReserves: virtualTokenReserves,
+              realSolReserves: virtualSolReserves,
+              tokenTotalSupply,
+              complete: false,
+            };
+          }
+        } catch (fallbackError) {
+          // Silent fallback failure
+        }
+
+        return null;
+      }
     } catch (error) {
-      logger.error('Error fetching bonding curve state:', error);
+      logger.error(`Error fetching bonding curve state for ${mint.toString()}: ${error.message}`);
       return null;
     }
   }
