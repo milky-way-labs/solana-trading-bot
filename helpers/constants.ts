@@ -39,10 +39,13 @@ export const USE_TELEGRAM = retrieveEnvVariable('USE_TELEGRAM', logger) === 'tru
 export const USE_DISCORD = retrieveEnvVariable('USE_DISCORD', logger, false) === 'true';
 export const DISCORD_WEBHOOK_URL = retrieveEnvVariable('DISCORD_WEBHOOK_URL', logger, false);
 
+// Protocol listeners configuration
+export const ENABLE_RAYDIUM_LISTENER = retrieveEnvVariable('ENABLE_RAYDIUM_LISTENER', logger, false) === 'true';
+export const ENABLE_PUMP_FUN_LISTENER = retrieveEnvVariable('ENABLE_PUMP_FUN_LISTENER', logger, false) === 'true';
+
 // Pump.fun
 export const PUMP_FUN_PROGRAM_ID = retrieveEnvVariable('PUMP_FUN_PROGRAM_ID', logger, false) || '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P';
 export const PUMP_FUN_MIGRATION_PROGRAM = retrieveEnvVariable('PUMP_FUN_MIGRATION_PROGRAM', logger, false) || '39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg';
-export const ENABLE_PUMP_FUN_LISTENER = retrieveEnvVariable('ENABLE_PUMP_FUN_LISTENER', logger, false) === 'true';
 export const PUMP_FUN_MIN_MARKET_CAP = Number(retrieveEnvVariable('PUMP_FUN_MIN_MARKET_CAP', logger, false) || 0);
 export const PUMP_FUN_MAX_MARKET_CAP = Number(retrieveEnvVariable('PUMP_FUN_MAX_MARKET_CAP', logger, false) || 69000);
 export const PUMP_FUN_BONDING_CURVE_THRESHOLD = Number(retrieveEnvVariable('PUMP_FUN_BONDING_CURVE_THRESHOLD', logger, false) || 85);

@@ -31,7 +31,7 @@ const transport = pino.transport({
 
 export const logger = pino(
   {
-    level: 'info',
+    level: process.env.LOG_LEVEL || 'info',
     redact: ['poolKeys'],
     serializers: { error: pino.stdSerializers.err },
     base: undefined,

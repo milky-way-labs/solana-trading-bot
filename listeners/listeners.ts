@@ -3,7 +3,7 @@ import bs58 from 'bs58';
 import { Connection, PublicKey, ParsedTransactionWithMeta } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { EventEmitter } from 'events';
-import { PUMP_FUN_PROGRAM_ID, PUMP_FUN_MIGRATION_PROGRAM, ENABLE_PUMP_FUN_LISTENER } from '../helpers/constants';
+import { PUMP_FUN_PROGRAM_ID, PUMP_FUN_MIGRATION_PROGRAM, ENABLE_PUMP_FUN_LISTENER, ENABLE_RAYDIUM_LISTENER } from '../helpers/constants';
 import { PumpFunHelper, PumpFunCreateEvent, PumpFunTradeEvent, PumpFunCompleteEvent } from '../helpers/pump-fun';
 import { logger } from '../helpers/logger';
 
@@ -23,16 +23,26 @@ export class Listeners extends EventEmitter {
     cacheNewMarkets: boolean;
   }) {
     logger.info('Starting listeners...');
-    
-    if (config.cacheNewMarkets) {
+
+    // Protocol selection logging
+    logger.info(`🔧 Protocol configuration:`);
+    logger.info(`   - Raydium listener: ${ENABLE_RAYDIUM_LISTENER ? 'ENABLED' : 'DISABLED'}`);
+    logger.info(`   - Pump.fun listener: ${ENABLE_PUMP_FUN_LISTENER ? 'ENABLED' : 'DISABLED'}`);
+
+    if (config.cacheNewMarkets && ENABLE_RAYDIUM_LISTENER) {
       const openBookSubscription = await this.subscribeToOpenBookMarkets(config);
       this.subscriptions.push(openBookSubscription);
       logger.info('OpenBook markets listener started');
     }
 
-    const raydiumSubscription = await this.subscribeToRaydiumPools(config);
-    this.subscriptions.push(raydiumSubscription);
-    logger.info('Raydium pools listener started');
+    // Subscribe to Raydium pools if enabled
+    if (ENABLE_RAYDIUM_LISTENER) {
+      const raydiumSubscription = await this.subscribeToRaydiumPools(config);
+      this.subscriptions.push(raydiumSubscription);
+      logger.info('Raydium pools listener started');
+    } else {
+      logger.info('Raydium pools listener DISABLED - skipping');
+    }
 
     // Subscribe to pump.fun if enabled
     if (ENABLE_PUMP_FUN_LISTENER) {
@@ -43,6 +53,8 @@ export class Listeners extends EventEmitter {
       const pumpFunMigrationSubscription = await this.subscribeToPumpFunMigrations();
       this.subscriptions.push(pumpFunMigrationSubscription);
       logger.info('Pump.fun migrations listener started');
+    } else {
+      logger.info('Pump.fun listeners DISABLED - skipping');
     }
 
     if (config.autoSell) {
@@ -52,6 +64,22 @@ export class Listeners extends EventEmitter {
     }
 
     logger.info(`Total listeners started: ${this.subscriptions.length}`);
+
+    // Add heartbeat to verify WebSocket connectivity
+    setInterval(() => {
+      logger.info(`🔄 WebSocket heartbeat - ${this.subscriptions.length} active subscriptions`);
+    }, 30000); // Every 30 seconds
+
+    // Protocol status summary
+    const enabledProtocols = [];
+    if (ENABLE_RAYDIUM_LISTENER) enabledProtocols.push('Raydium');
+    if (ENABLE_PUMP_FUN_LISTENER) enabledProtocols.push('Pump.fun');
+
+    if (enabledProtocols.length === 0) {
+      logger.warn('⚠️ NO PROTOCOLS ENABLED - Bot will not detect any tokens!');
+    } else {
+      logger.info(`🎯 Enabled protocols: ${enabledProtocols.join(', ')}`);
+    }
   }
 
   public getActiveListenerCount(): number {
@@ -83,6 +111,7 @@ export class Listeners extends EventEmitter {
     return this.connection.onProgramAccountChange(
       MAINNET_PROGRAM_ID.AmmV4,
       async (updatedAccountInfo) => {
+        logger.debug(`🏊 Raydium pool update: ${updatedAccountInfo.accountId.toString()}`);
         this.emit('pool', updatedAccountInfo);
       },
       this.connection.commitment,
@@ -140,21 +169,32 @@ export class Listeners extends EventEmitter {
       pumpFunProgramId,
       async (logs, ctx) => {
         try {
-          // Fast priority check for create transactions
-          const hasCreateLog = logs.logs.some(log => log.includes('Program log: Instruction: Create'));
+          // Log ALL pump.fun activity for debugging
+          logger.info(`🎯 Pump.fun logs received: ${logs.signature} - ${logs.logs.length} logs`);
+
+          // Check for CREATE transactions (more permissive approach)
+          const hasCreateLog = logs.logs.some(log =>
+            log.includes('Program log: Instruction: Create') ||
+            log.includes('CreateTokenMetadata') ||
+            log.includes('InitializeMint') ||
+            log.toLowerCase().includes('create')
+          );
+
+          // Process ANY transaction that has create indicators
           if (hasCreateLog) {
-            // Immediately emit create event with minimal processing
-            this.emit('pumpFunCreate', { 
+            logger.info(`🚀 PUMP.FUN TOKEN CREATION detected in tx: ${logs.signature}`);
+            // Emit create event with minimal processing for speed
+            this.emit('pumpFunCreate', {
               signature: logs.signature,
               logs: logs.logs,
               ctx,
               slot: ctx.slot,
               timestamp: Date.now() // Add current timestamp for freshness check
             });
-            return; // Skip other checks for create events to maximize speed
+            return; // Process as create event
           }
           
-          // Check for other events only if not a create event
+          // Check for other events only if not a create event (but don't log them to keep output clean)
           const hasTradeLog = logs.logs.some(log => 
             log.includes('Program log: Instruction: Buy') || 
             log.includes('Program log: Instruction: Sell')
@@ -179,6 +219,7 @@ export class Listeners extends EventEmitter {
               logs: logs.logs,
               ctx 
             });
+            return;
           }
           
         } catch (error) {
