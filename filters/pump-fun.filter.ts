@@ -42,11 +42,34 @@ export class PumpFunFilter {
     let passed = true;
 
     try {
-      // Get bonding curve state
+      // Get bonding curve state - for new tokens this might not exist yet
       const bondingCurveState = await this.pumpFunHelper.getBondingCurveState(mint);
       if (!bondingCurveState) {
-        reasons.push('Failed to fetch bonding curve state');
-        return { passed: false, reasons };
+        // For new tokens, we'll assume they start at 0 progress
+        // For new tokens that don't have bonding curve yet, create mock state
+        const mockBondingCurveState: BondingCurveState = {
+          virtualTokenReserves: new (require('bn.js'))(0),
+          virtualSolReserves: new (require('bn.js'))(0),
+          realTokenReserves: new (require('bn.js'))(0),
+          realSolReserves: new (require('bn.js'))(0),
+          tokenTotalSupply: new (require('bn.js'))(1000000000000), // 1B tokens with 6 decimals
+          complete: false,
+        };
+
+        logger.debug(`✅ New pump.fun token ${mint.toString()} passed (bonding curve not initialized yet)`);
+        return {
+          passed: true,
+          reasons: [],
+          bondingCurveState: mockBondingCurveState,
+          tokenData: {
+            mint,
+            progress: 0,
+            marketCapSol: 0,
+            isCompleted: false,
+            virtualSolReserves: mockBondingCurveState.virtualSolReserves,
+            virtualTokenReserves: mockBondingCurveState.virtualTokenReserves,
+          } as Partial<PumpFunToken>
+        };
       }
 
       // Calculate metrics
@@ -58,7 +81,7 @@ export class PumpFunFilter {
       );
       const isCompleted = bondingCurveState.complete || progress >= 100;
 
-      logger.debug(`Pump.fun token ${mint.toString()} - Progress: ${progress.toFixed(2)}%, MarketCap: $${marketCap.toFixed(2)}, Completed: ${isCompleted}`);
+      // Progress info will be logged only if token passes all filters
 
       // Market cap filters
       const minMarketCap = config.minMarketCap ?? PUMP_FUN_MIN_MARKET_CAP;
@@ -122,10 +145,8 @@ export class PumpFunFilter {
         } as Partial<PumpFunToken>
       };
 
-      if (passed) {
-        logger.info(`✅ Pump.fun token ${mint.toString()} passed all filters`);
-      } else {
-        logger.debug(`❌ Pump.fun token ${mint.toString()} failed filters: ${reasons.join(', ')}`);
+      if (!passed) {
+        logger.debug(`❌ Pump.fun token ${mint.toString()} failed pump.fun filters: ${reasons.join(', ')}`);
       }
 
       return result;

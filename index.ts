@@ -1,6 +1,7 @@
 import { MarketCache, PoolCache } from './cache';
 import { Listeners } from './listeners';
 import { Connection, KeyedAccountInfo, Keypair, PublicKey } from '@solana/web3.js';
+import BN from 'bn.js';
 import { LIQUIDITY_STATE_LAYOUT_V4, MARKET_STATE_LAYOUT_V3, Token, TokenAmount } from '@raydium-io/raydium-sdk';
 import { AccountLayout, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { Bot, BotConfig } from './bot';
@@ -280,6 +281,19 @@ const KNOWN_PROGRAM_IDS = new Set([
   'auth9SigNpDKz4sJJ1DfCTuZrZNSAgh9sFD3rboVmgg' // Token Auth Rules
 ]);
 
+// Known pump.fun account patterns that are NOT mint addresses
+const PUMP_FUN_NON_MINT_PATTERNS = [
+  'Dn8BWWfCn86',  // Bonding curve accounts pattern
+  'Ce6TQqeHC1',   // Another common pump.fun account pattern
+  'CebN5WGQ4j',   // Fee accounts
+  // Add more patterns as discovered
+];
+
+// Function to check if an address is likely a pump.fun system account (not a mint)
+function isPumpFunSystemAccount(address: string): boolean {
+  return PUMP_FUN_NON_MINT_PATTERNS.some(pattern => address.startsWith(pattern));
+}
+
 // Helper function to extract mint address from pump.fun transaction using proper method
 async function extractMintFromPumpFunTransaction(signature: string, connection: Connection): Promise<string | null> {
   try {
@@ -290,100 +304,110 @@ async function extractMintFromPumpFunTransaction(signature: string, connection: 
     });
 
     if (!transaction) {
-      logger.debug(`Failed to fetch transaction: ${signature}`);
+      // Silent fail - transaction might not be available yet
       return null;
     }
 
-    // Method 1: Check postTokenBalances for newly created token accounts (most reliable)
+    // CRITICAL FIX: Don't use postTokenBalances as it finds existing tokens in new transactions
+    // Instead, look for NEW MINT CREATION in the account keys and pre/postBalances properly
+
+    // Method 1: Look for truly NEW MINT creation by checking if mint exists in preTokenBalances
     if (transaction.meta?.postTokenBalances && transaction.meta?.preTokenBalances) {
       const preBalances = transaction.meta.preTokenBalances;
       const postBalances = transaction.meta.postTokenBalances;
-      
-      // Find new token accounts (present in post but not in pre)
-      for (const postBalance of postBalances) {
-        const existedInPre = preBalances.some(preBalance => 
-          preBalance.accountIndex === postBalance.accountIndex && 
-          preBalance.mint === postBalance.mint
-        );
-        
-        if (!existedInPre && postBalance.mint && !KNOWN_PROGRAM_IDS.has(postBalance.mint)) {
-          logger.debug(`Found new mint in postTokenBalances: ${postBalance.mint}`);
-          return postBalance.mint;
-        }
-      }
-    }
 
-    // Method 2: Look for InitializeMint2 instruction and get account keys
-    if (transaction.meta?.logMessages) {
-      // Check if this contains mint initialization
-      const hasInitializeMint = transaction.meta.logMessages.some(log => 
-        log.includes('InitializeMint2') || 
-        log.includes('initialize mint')
-      );
-      
-      if (hasInitializeMint && transaction.transaction.message.accountKeys) {
-        // In pump.fun Create transactions, the new mint is typically one of the account keys
-        // Skip system programs and look for potential mint addresses
-        for (const accountKey of transaction.transaction.message.accountKeys) {
-          const accountAddress = accountKey.pubkey.toString();
-          
-          // Skip known program IDs
-          if (KNOWN_PROGRAM_IDS.has(accountAddress)) {
-            continue;
-          }
-          
-          // Additional validation: check if this could be a mint account
-          try {
-            const mintInfo = await connection.getAccountInfo(new PublicKey(accountAddress));
-            if (mintInfo && mintInfo.data.length === 82) { // Mint account size
-              logger.debug(`Found potential mint from account keys: ${accountAddress}`);
-              return accountAddress;
+      // Find mints that appear in postTokenBalances but NEVER appeared in any preTokenBalances
+      const postMints = new Set(postBalances.map(b => b.mint).filter(Boolean));
+      const preMints = new Set(preBalances.map(b => b.mint).filter(Boolean));
+
+      for (const mint of postMints) {
+        // Skip if this mint was already present before the transaction
+        if (preMints.has(mint)) {
+          continue;
+        }
+
+        // Skip known programs and pump.fun system accounts
+        if (KNOWN_PROGRAM_IDS.has(mint!) || isPumpFunSystemAccount(mint!)) {
+          continue;
+        }
+
+        // Additional validation: verify this is a new mint account created in this transaction
+        try {
+          const mintPubkey = new PublicKey(mint!);
+          const mintInfo = await connection.getAccountInfo(mintPubkey);
+
+          if (mintInfo && mintInfo.data.length === 82) {
+            // CRITICAL: Check if this mint was created recently by examining the account
+            // For pump.fun, the mint should have specific characteristics if truly new
+            const mintData = mintInfo.data;
+            const supply = new BN(mintData.slice(68, 76), 'le'); // Mint supply at bytes 68-76
+
+            // New pump.fun tokens typically start with 1 billion tokens (1,000,000,000 * 1e6)
+            const expectedSupply = new BN(1000000000).mul(new BN(1000000)); // 1B * 1e6 decimals
+
+            if (supply.eq(expectedSupply)) {
+              logger.debug(`Found potentially new pump.fun mint with expected supply: ${mint}`);
+              return mint!;
+            } else {
+              logger.debug(`Skipping mint ${mint} - supply ${supply.toString()} doesn't match new pump.fun pattern`);
             }
-          } catch {
-            // Continue checking other accounts
           }
+        } catch (error) {
+          logger.debug(`Error validating mint ${mint}:`, error);
         }
       }
     }
 
-    // Method 3: Parse program data from logs if available (fallback)
-    if (transaction.meta?.logMessages) {
-      for (const log of transaction.meta.logMessages) {
-        if (log.includes('Program data:')) {
+    // Method 2: Look for mint in account keys for CREATE transactions (FALLBACK)
+    if (transaction.meta?.logMessages && transaction.transaction.message.accountKeys) {
+      const hasPumpFunCreate = transaction.meta.logMessages.some(log =>
+        log.includes('Program log: Instruction: Create') &&
+        log.includes('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P')
+      );
+
+      if (hasPumpFunCreate) {
+        // For pump.fun CREATE transactions, the mint is usually in the first few account keys
+        // Skip the first account (usually the user), look for mint accounts
+        for (let i = 1; i < Math.min(transaction.transaction.message.accountKeys.length, 6); i++) {
           try {
-            const dataMatch = log.match(/Program data: ([A-Za-z0-9+/=]+)/);
-            if (dataMatch && dataMatch[1]) {
-              const base64Data = dataMatch[1];
-              const buffer = Buffer.from(base64Data, 'base64');
-              
-              if (buffer.length >= 32) {
-                // Try to extract 32-byte PublicKey from different offsets
-                for (let offset = 0; offset <= buffer.length - 32; offset += 8) {
-                  try {
-                    const potentialMint = new PublicKey(buffer.subarray(offset, offset + 32));
-                    const mintString = potentialMint.toString();
-                    
-                    if (!KNOWN_PROGRAM_IDS.has(mintString) && 
-                        mintString !== '11111111111111111111111111111111') {
-                      logger.debug(`Found potential mint from program data: ${mintString}`);
-                      return mintString;
-                    }
-                  } catch {
-                    continue;
-                  }
-                }
+            const accountKey = transaction.transaction.message.accountKeys[i];
+            const accountAddress = accountKey.pubkey.toString();
+
+            // Skip known system programs and pump.fun system accounts
+            if (KNOWN_PROGRAM_IDS.has(accountAddress) || isPumpFunSystemAccount(accountAddress)) {
+              continue;
+            }
+
+            // Check if this could be a mint account
+            const mintInfo = await connection.getAccountInfo(new PublicKey(accountAddress));
+            if (mintInfo && mintInfo.data.length === 82) {
+              // Additional validation for pump.fun characteristics
+              const mintData = mintInfo.data;
+              const decimals = mintData[76];
+              const supply = new BN(mintData.slice(68, 76), 'le');
+              const expectedSupply = new BN('1000000000000000'); // 1B * 1e6
+
+              if (decimals === 6 && supply.eq(expectedSupply)) {
+                logger.debug(`Found fresh mint from account keys: ${accountAddress}`);
+                return accountAddress;
               }
+              // Skip silently if characteristics don't match
             }
           } catch (error) {
-            logger.debug('Error parsing program data:', error);
+            // Continue to next account
+            continue;
           }
         }
       }
     }
+
+    // Method 3: DISABLED - Program data parsing was extracting wrong addresses
+    // The program data method was unreliable and extracted bonding curve addresses
+    logger.debug(`Could not extract mint from pump.fun transaction ${signature} - only postTokenBalances method succeeded`);
 
     return null;
   } catch (error) {
-    logger.debug(`Error extracting mint from transaction ${signature}:`, error);
+    // Silent fail - many transactions won't be parseable
     return null;
   }
 }
@@ -701,7 +725,7 @@ const runListener = async () => {
         if (createEvent.timestamp) {
           const eventLag = Date.now() - createEvent.timestamp;
           if (eventLag > 5000) { // Skip if event is older than 5 seconds
-            logger.debug(`⏰ Skipping pump.fun token - event too old (${eventLag}ms)`);
+            // Silent skip - event too old
             return;
           }
         }
@@ -718,13 +742,50 @@ const runListener = async () => {
         // Always use full transaction parsing for accurate results
         // (Disable quick log parsing as it was extracting program IDs instead of mints)
         mintAddress = await extractMintFromPumpFunTransaction(createEvent.signature, connection);
-        
+
         if (mintAddress) {
-          logger.info(`🚀 NEW PUMP.FUN TOKEN DETECTED | Address: ${mintAddress} | Tx: ${createEvent.signature} | Lag: ${eventLag}ms`);
-          await bot.handlePumpFunToken(new PublicKey(mintAddress), 'new');
+          // Validate the extracted mint address before processing
+          try {
+            const mintPubkey = new PublicKey(mintAddress);
+
+            // Additional validation: check if it's a valid mint account with expected properties
+            const mintAccountInfo = await connection.getAccountInfo(mintPubkey);
+            if (!mintAccountInfo || mintAccountInfo.data.length !== 82) {
+              logger.debug(`⚠️ Extracted address ${mintAddress} is not a valid mint account (size: ${mintAccountInfo?.data.length || 0}), skipping`);
+              return;
+            }
+
+            // CRITICAL: Check if this is actually a fresh pump.fun token
+            const mintData = mintAccountInfo.data;
+            const supply = new BN(mintData.slice(68, 76), 'le');
+            const decimals = mintData[76];
+            const mintAuthorityBytes = mintData.slice(4, 36);
+
+            // Validate pump.fun characteristics
+            const expectedSupply = new BN('1000000000000000'); // 1B * 1e6
+            const isCorrectDecimals = decimals === 6;
+            const hasAuthority = !mintAuthorityBytes.every(byte => byte === 0);
+
+            if (!isCorrectDecimals) {
+              // Silent skip - wrong decimals (not pump.fun)
+              return;
+            }
+
+            if (!supply.eq(expectedSupply)) {
+              // Silent skip - token has wrong supply (likely existing token)
+              return;
+            }
+
+            logger.info(`🎆 FRESH PUMP.FUN TOKEN | ${mintAddress} | Tx: ${createEvent.signature} | Lag: ${eventLag}ms`);
+            await bot.handlePumpFunToken(mintPubkey, 'new');
+
+          } catch (error) {
+            logger.debug(`Error validating mint address ${mintAddress}:`, error);
+            return;
+          }
           return;
         } else {
-          logger.debug(`❌ Could not extract mint address from pump.fun transaction: ${createEvent.signature}`);
+          // Silent fail - could not extract mint from create event
           return;
         }
         
