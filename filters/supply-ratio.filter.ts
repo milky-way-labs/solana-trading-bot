@@ -1,29 +1,21 @@
 import { Filter, FilterResult } from './pool-filters';
 import { Connection } from '@solana/web3.js';
 import { LiquidityPoolKeysV4 } from '@raydium-io/raydium-sdk';
-import { logger } from '../helpers';
-import { RATIO_TOKEN_POOL } from '../helpers';
+import { logger, RATIO_TOKEN_POOL } from '../helpers';
 
-export class BurnFilter implements Filter {
+export class TokenSupplyRatioFilter implements Filter {
   private cachedResult: FilterResult | undefined = undefined;
 
   constructor(private readonly connection: Connection) {}
 
-  getName(): string {
-    return 'BurnFilter';
-  }
-
   async execute(poolKeys: LiquidityPoolKeysV4): Promise<FilterResult> {
+    console.log('TokenSupplyRatioFilter')
     if (this.cachedResult) {
       return this.cachedResult;
     }
 
     try {
-      const amount = await this.connection.getTokenSupply(poolKeys.lpMint, this.connection.commitment);
-      // Check if the LP token supply is 0, which means the creator burned their LP tokens
-      // This is a good sign as it means they can't rug pull by removing liquidity
-      const burned = amount.value.uiAmount === 0;
-      const result = { ok: burned, message: burned ? undefined : "Burned -> Creator didn't burn LP" };
+      
 
       const tokenAmount = await this.connection.getTokenSupply(poolKeys.baseMint)
 
@@ -36,6 +28,8 @@ export class BurnFilter implements Filter {
       // Calculate percentage of tokens in pool vs total supply
       const percentageInPool = (baseTokenAmount.value.uiAmount! / tokenAmount.value.uiAmount!) * 100;
       logger.trace(`Percentage of tokens in pool: ${percentageInPool.toFixed(2)}%`);
+
+      const result = { ok: true }
 
       // If lesse than 99% of tokens are in pool, it's suspicious
       if (percentageInPool < RATIO_TOKEN_POOL) {
@@ -53,9 +47,9 @@ export class BurnFilter implements Filter {
         return { ok: true };
       }
 
-      logger.error({ mint: poolKeys.baseMint }, `Failed to check if LP is burned`);
+      logger.error({ mint: poolKeys.baseMint }, `Failed to check LP token supply ratio`);
     }
 
-    return { ok: false, message: 'Failed to check if LP is burned' };
+    return { ok: false, message: 'Failed to check LP token supply ratio' };
   }
 }

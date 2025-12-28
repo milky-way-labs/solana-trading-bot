@@ -239,7 +239,10 @@ The bot includes an intelligent auto-blacklist system that learns from rug pulls
 - `AUTO_BLACKLIST_LOSS_THRESHOLD` - Loss percentage threshold to trigger auto-blacklisting (default: 80%).
   - If a token loses more than this percentage, it will be automatically added to symbol blacklist. 
 - `WHITELIST_REFRESH_INTERVAL` - Interval in milliseconds to refresh the whitelist 
-  - Whitelist checks update authority metadata of token, for "creator" wallets. 
+  - Whitelist checks update authority metadata of token, for "creator" wallets.
+- `CHECK_TOKEN_SUPPLY_RATIO` - Set to `true` to check the ratio between token supply and pool liquidity.
+- `RATIO_TOKEN_POOL` - Minimum allowed ratio between token supply and pool liquidity.
+  - This helps identify potential rug pulls where token supply is much larger than token's amount in liquidity pool.
 
 #### Holders
 
